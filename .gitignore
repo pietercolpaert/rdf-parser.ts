@@ -1,0 +1,6 @@
+node_modules/
+dist/
+coverage/
+.rdf-test-suite-cache/
+*.log
+spec/earl-*.ttl
