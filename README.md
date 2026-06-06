@@ -8,8 +8,8 @@ The package exposes an Comunica-compatible `Parser` and `StreamParser` API so it
 
 The implementation is intentionally compact: the hot path is a single scanner/parser that avoids reusable lexer abstractions, token object allocation, and runtime dependency overhead. Public APIs stay RDF-JS-compatible while parser internals remain optimized for machine-generated maintenance.
 
-[!NOTE]  
-I’ve built this as an agentic coding test for myself. I’m happy to see spec compliance, messages support, and a great performance increase over N3.js, but integration tests with other software will need to point out whether this work is indeed as maintainable and useful as other libraries.
+> [!NOTE]  
+> I’ve built this as an agentic coding test for myself. I’m happy to see spec compliance, messages support, and a great performance increase over N3.js, but integration tests with other software will need to point out whether this work is indeed as maintainable and useful as other libraries.
 
 ## Supported formats
 
