@@ -10,6 +10,7 @@ The implementation is intentionally compact: the hot path is a single scanner/pa
 - N-Quads
 - Turtle prefixes, base IRIs, literals, numeric/boolean literals, predicate/object lists, blank nodes, collections, and RDF1.2 triple terms
 - TriG graph blocks and RDF1.2 triple terms
+- RDF Message Logs for N-Triples, N-Quads, Turtle, and TriG through `VERSION "...-messages"`, `MESSAGE`, `@version`, and `@message .`
 
 The spec-test wiring is copied from the adjacent N3.js setup and runs the official RDF 1.1 and RDF1.2 manifests through `rdf-test-suite`. This initial parser scaffold is designed to grow toward full conformance while keeping performance-focused internals.
 
@@ -92,9 +93,69 @@ parser.parse('<s> <p> <o>.', (error, quad, prefixes) => {
 });
 ```
 
+## RDF Messages
+
+RDF Messages mode is enabled automatically when the input contains a messages version label, such as `VERSION "1.2-messages"` or `@version "1.2-messages" .`. It can also be enabled explicitly with `rdfMessages: true` or `messages: true` in the parser options.
+
+When RDF Messages mode is active, `Parser#parse()` returns entries that contain both the parsed quad and the message counter. Counters start at `0` and increase at each `MESSAGE` or `@message .` delimiter.
+
+```ts
+import { Parser, isMessageQuad, quadToString } from 'rdf-parser-ts';
+
+const output = new Parser().parse(`
+  VERSION "1.2-messages"
+  <http://example.org/s1> <http://example.org/p> <http://example.org/o1> .
+  MESSAGE
+  <http://example.org/s2> <http://example.org/p> <http://example.org/o2> .
+`);
+
+for (const entry of output ?? []) {
+  if (isMessageQuad(entry)) {
+    console.log(entry.messageCounter, quadToString(entry.quad));
+  }
+}
+```
+
+The callback form still emits quads, with an additional optional message-counter argument when RDF Messages mode is active:
+
+```ts
+new Parser().parse(input, (error, quad, prefixes, messageCounter) => {
+  if (error) throw error;
+  if (quad) console.log(messageCounter, quadToString(quad));
+});
+```
+
+Use `toMessages()` to group parser output into `Message` instances. `Message` extends `Array` and contains the quads belonging to one RDF Message. Empty messages are preserved when the input contains delimiters before the first quad or between two delimiters, while a final delimiter after a non-empty message does not create an additional empty trailing message.
+
+```ts
+import { Parser, toMessages } from 'rdf-parser-ts';
+
+const output = new Parser({ rdfMessages: true }).parse(`
+  MESSAGE
+  <http://example.org/s> <http://example.org/p> <http://example.org/o> .
+`);
+
+const messages = toMessages(output ?? []);
+console.log(messages[0]?.length); // 0
+console.log(messages[1]?.length); // 1
+```
+
+For direct message-level parsing, use `parseMessages()`:
+
+```ts
+const messages = new Parser({ baseIRI: 'http://example.org/' }).parseMessages(`
+  VERSION "1.2-messages"
+  <s1> <p> <o1> .
+  MESSAGE
+  <s2> <p> <o2> .
+`);
+```
+
+Blank node labels are scoped per message in RDF Messages mode, so the same blank node label in two messages produces distinct blank node terms.
+
 ## Streaming parsing
 
-`StreamParser` is a Node.js `Transform` stream in object mode. It accepts string or `Buffer` chunks and emits RDF-JS quads.
+`StreamParser` is a Node.js `Transform` stream in object mode. It accepts string or `Buffer` chunks and emits RDF-JS quads. In RDF Messages mode, it emits `{ quad, messageCounter }` entries and a `messageCounter` event for each parsed quad.
 
 ```ts
 import { createReadStream } from 'node:fs';
@@ -151,6 +212,7 @@ Exports include:
 - `Variable`
 - `DefaultGraph`
 - `Quad`
+- `Message`
 - `namedNode`
 - `blankNode`
 - `literal`
@@ -161,6 +223,8 @@ Exports include:
 - `quadToString()`
 - `termToId()`
 - `termFromId()`
+- `isMessageQuad()`
+- `toMessages()`
 
 ## Custom RDF-JS factories
 
@@ -202,6 +266,7 @@ The `spec/` setup mirrors N3.js:
 - `spec/parser.cjs` implements the `rdf-test-suite` parser interface by piping `streamify-string(data)` into `new StreamParser(...)` and collecting with `arrayify-stream`.
 - `spec/earl-meta.json` contains metadata for EARL report generation.
 - `.rdf-test-suite-cache/` is used for downloaded manifests.
+- Library-specific RDF Messages tests cover the behavior described by the RDF Messages tests document: `VERSION` and `@version`, `MESSAGE` and `@message .`, message counters, empty messages, final delimiters, repeated prefixes, named graphs, blank-node scoping, and delimiter errors.
 
 Available spec commands:
 
@@ -259,7 +324,7 @@ Default RDF1.2 triple-term input, from `npm run perf:quick`:
 | 10,000 | rdf-parser-ts | 0.026s | 387,449 q/s | 1.1 MiB | 3.1 MiB |
 | 10,000 | rdf-parser-ts/relax | 0.023s | 441,230 q/s | 1.1 MiB | 9.6 MiB |
 | 10,000 | N3.js | 0.053s | 235,256 q/s | 1.1 MiB | 10.6 MiB |
--
+
 Line-format input without RDF1.2 triple terms, from `node perf/bench.js --sizes 1000,10000 --no-triple-terms`:
 
 | Statements | Parser | Time | Throughput | Input | RSS delta |

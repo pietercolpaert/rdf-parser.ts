@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs';
-import { Parser, quadToString } from '../index';
+import { Parser, isMessageQuad, quadToString } from '../index';
 
 function printUsage(): void {
   process.stderr.write(`Usage: rdf-parser-ts [--format FORMAT] [--base IRI] [file]\n\nParses RDF and writes canonical N-Quads/N-Triples-style lines to stdout.\nWhen no file is passed, input is read from stdin.\n`);
@@ -43,4 +43,7 @@ for (let i = 0; i < args.length; i++) {
 const input = file ? readFileSync(file, 'utf8') : readFileSync(0, 'utf8');
 const parser = new Parser({ format, baseIRI });
 const quads = parser.parse(input) ?? [];
-for (const quad of quads) process.stdout.write(`${quadToString(quad)}\n`);
+for (const item of quads) {
+  const quad = isMessageQuad(item) ? item.quad : item;
+  process.stdout.write(`${quadToString(quad)}\n`);
+}

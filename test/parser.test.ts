@@ -1,9 +1,13 @@
 import { Readable, Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
-import { DataFactory, Parser, StreamParser, quadToString, termFromId, termToString } from '../src';
+import { DataFactory, Message, Parser, StreamParser, isMessageQuad, quadToString, termFromId, termToString, toMessages, type MessageQuad, type QuadLike } from '../src';
 
 function ids(input: string, baseIRI = 'http://example.org/'): string[] {
-  return (new Parser({ baseIRI }).parse(input) ?? []).map(quadToString);
+  return ((new Parser({ baseIRI }).parse(input) ?? []) as QuadLike[]).map(quadToString);
+}
+
+function messageIds(messages: Message[]): string[][] {
+  return messages.map(message => Array.from(message, quadToString));
 }
 
 describe('Parser', () => {
@@ -46,7 +50,7 @@ describe('Parser', () => {
   });
 
   it('supports an RDF-JS factory override', () => {
-    const quads = new Parser({ factory: DataFactory }).parse('<s> <p> "o" .') ?? [];
+    const quads = (new Parser({ factory: DataFactory }).parse('<s> <p> "o" .') ?? []) as QuadLike[];
     expect(quads[0]?.subject.termType).toBe('NamedNode');
     expect(quads[0]?.object.termType).toBe('Literal');
     expect(quads[0]?.graph.termType).toBe('DefaultGraph');
@@ -106,5 +110,187 @@ describe('StreamParser', () => {
 
     expect(prefixes).toEqual(['ex']);
     expect(comments).toEqual([' hi']);
+  });
+});
+
+describe('RDF Messages', () => {
+  it('emits message counters when a version label enables RDF Messages', () => {
+    const output = new Parser({ baseIRI: 'http://example.org/' }).parse(`
+      VERSION "1.2-messages"
+      <s1> <p> <o1> .
+      MESSAGE
+      <s2> <p> <o2> .
+    `) ?? [];
+
+    expect(output.every(isMessageQuad)).toBe(true);
+    const entries = output as MessageQuad[];
+    expect(entries.map(entry => entry.messageCounter)).toEqual([0, 1]);
+    expect(entries.map(entry => quadToString(entry.quad))).toEqual([
+      '<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .',
+      '<http://example.org/s2> <http://example.org/p> <http://example.org/o2> .',
+    ]);
+  });
+
+  it('supports explicit RDF Messages mode without an inline version label', () => {
+    const output = new Parser({ baseIRI: 'http://example.org/', rdfMessages: true }).parse('<s1> <p> <o1> . MESSAGE <s2> <p> <o2> .') ?? [];
+    expect((output as MessageQuad[]).map(entry => entry.messageCounter)).toEqual([0, 1]);
+  });
+
+  it('groups parser output into Message arrays and preserves empty messages', () => {
+    const output = new Parser({ baseIRI: 'http://example.org/' }).parse(`
+      VERSION "1.2-messages"
+      MESSAGE
+      <s1> <p> <o1> .
+      MESSAGE
+      MESSAGE
+      <s2> <p> <o2> .
+      MESSAGE
+    `) ?? [];
+
+    const messages = toMessages(output);
+    expect(messages.every(message => message instanceof Message)).toBe(true);
+    expect(messages.map(message => message.messageCounter)).toEqual([0, 1, 2, 3]);
+    expect(messageIds(messages)).toEqual([
+      [],
+      ['<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .'],
+      [],
+      ['<http://example.org/s2> <http://example.org/p> <http://example.org/o2> .'],
+    ]);
+  });
+
+  it('parses messages directly with parseMessages()', () => {
+    const messages = new Parser({ baseIRI: 'http://example.org/' }).parseMessages(`
+      VERSION "1.2-messages"
+      <s1> <p> <o1> .
+      MESSAGE
+      <s2> <p> <o2> .
+    `);
+
+    expect(messageIds(messages)).toEqual([
+      ['<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .'],
+      ['<http://example.org/s2> <http://example.org/p> <http://example.org/o2> .'],
+    ]);
+  });
+
+  it('supports @version and @message with repeated prefixes', () => {
+    const messages = new Parser().parseMessages(`
+      @version "1.2-messages" .
+      @prefix ex: <http://example.org/one/> .
+      ex:s ex:p ex:o .
+      @message .
+      @prefix ex: <http://example.org/two/> .
+      ex:s ex:p ex:o .
+    `);
+
+    expect(messageIds(messages)).toEqual([
+      ['<http://example.org/one/s> <http://example.org/one/p> <http://example.org/one/o> .'],
+      ['<http://example.org/two/s> <http://example.org/two/p> <http://example.org/two/o> .'],
+    ]);
+  });
+
+  it('preserves N-Quads graph names in messages', () => {
+    const messages = new Parser({ format: 'n-quads' }).parseMessages(`
+      VERSION "1.2-messages"
+      <http://example.org/s1> <http://example.org/p> <http://example.org/o1> <http://example.org/g1> .
+      MESSAGE
+      <http://example.org/s2> <http://example.org/p> <http://example.org/o2> <http://example.org/g2> .
+    `);
+
+    expect(messageIds(messages)).toEqual([
+      ['<http://example.org/s1> <http://example.org/p> <http://example.org/o1> <http://example.org/g1> .'],
+      ['<http://example.org/s2> <http://example.org/p> <http://example.org/o2> <http://example.org/g2> .'],
+    ]);
+  });
+
+  it('supports default-graph and named-graph quads in one message', () => {
+    const messages = new Parser().parseMessages(`
+      VERSION "1.2-messages"
+      PREFIX ex: <http://example.org/>
+      ex:s1 ex:p ex:o1 .
+      ex:g {
+        ex:s2 ex:p ex:o2 .
+        ex:s3 ex:p ex:o3 .
+      }
+      MESSAGE
+      ex:s4 ex:p ex:o4 .
+    `);
+
+    expect(messageIds(messages)).toEqual([
+      [
+        '<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .',
+        '<http://example.org/s2> <http://example.org/p> <http://example.org/o2> <http://example.org/g> .',
+        '<http://example.org/s3> <http://example.org/p> <http://example.org/o3> <http://example.org/g> .',
+      ],
+      ['<http://example.org/s4> <http://example.org/p> <http://example.org/o4> .'],
+    ]);
+  });
+
+  it('accepts a message boundary after a graph block', () => {
+    const messages = new Parser().parseMessages(`
+      VERSION "1.2-messages"
+      <http://example.org/g> {
+        <http://example.org/a> <http://example.org/b> <http://example.org/c> .
+      }
+      MESSAGE
+      <http://example.org/d> <http://example.org/e> <http://example.org/f> .
+    `);
+
+    expect(messageIds(messages)).toEqual([
+      ['<http://example.org/a> <http://example.org/b> <http://example.org/c> <http://example.org/g> .'],
+      ['<http://example.org/d> <http://example.org/e> <http://example.org/f> .'],
+    ]);
+  });
+
+  it('scopes blank node labels per message', () => {
+    const messages = new Parser({ rdfMessages: true }).parseMessages(`
+      _:b0 <http://example.org/p> <http://example.org/o1> .
+      MESSAGE
+      _:b0 <http://example.org/p> <http://example.org/o2> .
+    `);
+
+    const first = messages[0]?.[0]?.subject;
+    const second = messages[1]?.[0]?.subject;
+    expect(first?.termType).toBe('BlankNode');
+    expect(second?.termType).toBe('BlankNode');
+    expect(first?.equals(second)).toBe(false);
+  });
+
+  it('rejects message delimiters without RDF Messages mode', () => {
+    expect(() => new Parser().parse('<http://example.org/s> <http://example.org/p> <http://example.org/o> . MESSAGE')).toThrow(/RDF Messages are not enabled/);
+  });
+
+  it('rejects @message without a trailing dot', () => {
+    expect(() => new Parser().parse('VERSION "1.2-messages" <http://example.org/s> <http://example.org/p> <http://example.org/o> . @message <http://example.org/invalid>')).toThrow(/Expected \./);
+  });
+
+  it('rejects message delimiters inside graph blocks', () => {
+    expect(() => new Parser().parse(`
+      VERSION "1.2-messages"
+      <http://example.org/g> {
+        <http://example.org/a> <http://example.org/b> <http://example.org/c> .
+        MESSAGE
+      }
+    `)).toThrow(/inside graph blocks/);
+  });
+
+  it('streams message entries and emits messageCounter events', async () => {
+    const parser = new StreamParser({ baseIRI: 'http://example.org/' });
+    const entries: MessageQuad[] = [];
+    const counters: number[] = [];
+    parser.on('messageCounter', counter => counters.push(counter));
+
+    await new Promise<void>((resolve, reject) => {
+      parser.on('data', entry => entries.push(entry));
+      parser.on('error', reject);
+      parser.on('end', resolve);
+      parser.import(Readable.from(['VERSION "1.2-messages"\n<s1> <p> <o1> .\nMESSAGE\n<s2> <p> <o2> .']));
+    });
+
+    expect(counters).toEqual([0, 1]);
+    expect(entries.map(entry => entry.messageCounter)).toEqual([0, 1]);
+    expect(entries.map(entry => quadToString(entry.quad))).toEqual([
+      '<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .',
+      '<http://example.org/s2> <http://example.org/p> <http://example.org/o2> .',
+    ]);
   });
 });

@@ -15,6 +15,8 @@ export interface ParserOptions {
   factory?: DataFactoryLike;
   comments?: boolean;
   relax?: boolean;
+  rdfMessages?: boolean;
+  messages?: boolean;
   parseUnsupportedVersions?: boolean;
   version?: string;
 }
@@ -44,7 +46,23 @@ export type QuadLike = Term & {
   graph: TermLike;
 };
 
-export type ParseCallback = (error: Error | null, quad?: QuadLike | null, prefixes?: Record<string, NamedNodeLike>) => void;
+export interface MessageQuad {
+  quad: QuadLike;
+  messageCounter: number;
+}
+
+export type ParserOutput = QuadLike[] | MessageQuadArray;
+export type ParserOutputItem = QuadLike | MessageQuad;
+export type ParseCallback = (
+  error: Error | null,
+  quad?: QuadLike | null,
+  prefixes?: Record<string, NamedNodeLike>,
+  messageCounter?: number,
+) => void;
+
+export interface MessageQuadArray extends Array<MessageQuad> {
+  messageCount: number;
+}
 
 type EventCallbacks = {
   prefix?: (prefix: string, iri: NamedNodeLike) => void;
@@ -133,6 +151,16 @@ export class Quad implements QuadLike {
   public equals(other: unknown): boolean { return sameTerm(this, other); }
 }
 
+export class Message extends Array<QuadLike> {
+  public static override get [Symbol.species](): ArrayConstructor { return Array; }
+
+  public constructor(public readonly messageCounter: number, quads: Iterable<QuadLike> = []) {
+    super();
+    Object.setPrototypeOf(this, Message.prototype);
+    for (const quad of quads) this.push(quad);
+  }
+}
+
 const defaultGraphSingleton = new DefaultGraph();
 
 let globalBlankNodeCounter = 0;
@@ -169,7 +197,7 @@ export class Parser {
     this._factory = options.factory ?? DataFactory;
   }
 
-  public parse(input: string, callback?: ParseCallback): QuadLike[] | undefined {
+  public parse(input: string, callback?: ParseCallback): ParserOutput | undefined {
     try {
       const core = new CoreParser(input, this.options, {
         prefix: (prefix, iri) => undefined,
@@ -177,11 +205,15 @@ export class Parser {
       });
       const result = core.parse();
       if (callback) {
-        for (const quad of result.quads) callback(null, quad, result.prefixes);
+        if (result.messagesEnabled) {
+          for (const entry of result.messageQuads) callback(null, entry.quad, result.prefixes, entry.messageCounter);
+        } else {
+          for (const quad of result.quads) callback(null, quad, result.prefixes);
+        }
         callback(null, null, result.prefixes);
         return undefined;
       }
-      return result.quads;
+      return result.messagesEnabled ? result.messageQuads : result.quads;
     } catch (error) {
       if (callback) {
         callback(error instanceof Error ? error : new Error(String(error)));
@@ -190,6 +222,15 @@ export class Parser {
       throw error;
     }
   }
+
+  public parseMessages(input: string): Message[] {
+    const core = new CoreParser(input, { ...this.options, rdfMessages: true }, {
+      prefix: (prefix, iri) => undefined,
+      comment: comment => undefined,
+    });
+    const result = core.parse();
+    return toMessages(result.messageQuads);
+  }
 }
 
 export class StreamParser extends Transform {
@@ -197,9 +238,9 @@ export class StreamParser extends Transform {
   private readonly options: ParserOptions;
 
   public constructor(options: StreamParserOptions = {}) {
-    const { baseIRI, baseIRIPath, format, factory, comments, relax, parseUnsupportedVersions, version, ...streamOptions } = options;
+    const { baseIRI, baseIRIPath, format, factory, comments, relax, rdfMessages, messages, parseUnsupportedVersions, version, ...streamOptions } = options;
     super({ ...streamOptions, readableObjectMode: true });
-    this.options = { baseIRI, baseIRIPath, format, factory, comments, relax, parseUnsupportedVersions, version };
+    this.options = { baseIRI, baseIRIPath, format, factory, comments, relax, rdfMessages, messages, parseUnsupportedVersions, version };
   }
 
   public import(stream: Readable): this {
@@ -220,7 +261,15 @@ export class StreamParser extends Transform {
         prefix: (prefix, iri) => this.emit('prefix', prefix, iri),
         comment: comment => this.emit('comment', comment),
       });
-      for (const quad of parser.parse().quads) this.push(quad);
+      const result = parser.parse();
+      if (result.messagesEnabled) {
+        for (const entry of result.messageQuads) {
+          this.emit('messageCounter', entry.messageCounter, entry.quad);
+          this.push(entry);
+        }
+      } else {
+        for (const quad of result.quads) this.push(quad);
+      }
       callback();
     } catch (error) {
       callback(error instanceof Error ? error : new Error(String(error)));
@@ -236,6 +285,7 @@ class CoreParser {
   private readonly factory: DataFactoryLike;
   private readonly prefixes: Record<string, NamedNodeLike> = Object.create(null) as Record<string, NamedNodeLike>;
   private readonly quads: QuadLike[] = [];
+  private readonly messageQuads: MessageQuadArray = Object.assign([], { messageCount: 0 }) as MessageQuadArray;
   private readonly callbacks: EventCallbacks;
   private readonly strictNTriples: boolean;
   private readonly strictNQuads: boolean;
@@ -243,7 +293,13 @@ class CoreParser {
   private readonly relax: boolean;
   private readonly defaultGraphTerm: DefaultGraphLike;
   private readonly namedNodeCache = new Map<string, NamedNodeLike>();
+  private readonly blankNodeLabels = new Map<string, BlankNodeLike>();
   private baseIRI: string;
+  private version?: string;
+  private messagesEnabled: boolean;
+  private messageCounter = 0;
+  private messageCountHint = 0;
+  private afterMessageDelimiter = false;
   private localBlankNodeCounter = 0;
   private fastEnd = 0;
 
@@ -255,16 +311,21 @@ class CoreParser {
     this.callbacks = callbacks;
     this.relax = options.relax === true;
     this.defaultGraphTerm = this.factory.defaultGraph();
+    this.version = options.version;
+    this.messagesEnabled = options.rdfMessages === true || options.messages === true || isMessagesVersion(options.version);
     const format = (options.format ?? '').toLowerCase();
     this.strictNTriples = format.includes('n-triples');
     this.strictNQuads = format.includes('n-quads');
     this.allowLegacyTripleTerms = format.includes('*');
   }
 
-  public parse(): { quads: QuadLike[]; prefixes: Record<string, NamedNodeLike> } {
+  public parse(): { quads: QuadLike[]; messageQuads: MessageQuadArray; prefixes: Record<string, NamedNodeLike>; messagesEnabled: boolean } {
     while (true) {
       this.skipWsAndComments();
-      if (this.index >= this.length) return { quads: this.quads, prefixes: this.prefixes };
+      if (this.index >= this.length) {
+        this.finalizeEndOfFileMessage();
+        return { quads: this.quads, messageQuads: this.messageQuads, prefixes: this.prefixes, messagesEnabled: this.messagesEnabled };
+      }
       if ((this.strictNTriples || this.strictNQuads) && this.tryParseLineStatementFast()) continue;
       this.parseStatement(this.defaultGraphTerm);
     }
@@ -298,7 +359,7 @@ class CoreParser {
 
     if (this.input.charCodeAt(i) !== 46) return false;
     this.index = i + 1;
-    this.quads.push(this.factory.quad(subject, predicate, object, graph));
+    this.addQuad(subject, predicate, object, graph);
     return true;
   }
 
@@ -344,7 +405,7 @@ class CoreParser {
     }
     if (i === start) return null;
     this.fastEnd = i;
-    return this.factory.blankNode(this.input.slice(start, i));
+    return this.blankNodeFromLabel(this.input.slice(start, i));
   }
 
   private readFastLiteral(index: number): LiteralLike | null {
@@ -420,7 +481,7 @@ class CoreParser {
 
   private parseStatement(defaultGraph: TermLike): void {
     this.skipWsAndComments();
-    if (this.parseDirective()) return;
+    if (this.parseDirective(defaultGraph)) return;
     if (this.peekCharCode() === 123) {
       this.index++;
       this.parseGraphStatements(defaultGraph);
@@ -494,14 +555,24 @@ class CoreParser {
   }
 
   private addQuad(subject: TermLike, predicate: TermLike, object: TermLike, graph: TermLike): void {
-    this.quads.push(this.factory.quad(subject, predicate, object, graph));
+    const quad = this.factory.quad(subject, predicate, object, graph);
+    this.quads.push(quad);
+    if (this.messagesEnabled) {
+      this.messageQuads.push({ quad, messageCounter: this.messageCounter });
+      this.messageCountHint = Math.max(this.messageCountHint, this.messageCounter + 1);
+      this.afterMessageDelimiter = false;
+    }
   }
 
-  private parseDirective(): boolean {
+  private parseDirective(currentGraph: TermLike): boolean {
     const start = this.index;
     if (this.peekCharCode() === 64) {
       if (this.strictNTriples || this.strictNQuads) this.fail('Directives are not allowed in this format');
       this.index++;
+      if (this.matchWord('version')) {
+        this.parseVersionDirective(true);
+        return true;
+      }
       if (this.matchWord('prefix')) {
         this.parsePrefixDirective(true);
         return true;
@@ -510,8 +581,20 @@ class CoreParser {
         this.parseBaseDirective(true);
         return true;
       }
+      if (this.matchWord('message')) {
+        this.parseMessageDirective(true, currentGraph);
+        return true;
+      }
       this.index = start;
       return false;
+    }
+    if (this.matchWord('VERSION')) {
+      this.parseVersionDirective(false);
+      return true;
+    }
+    if (this.matchWord('MESSAGE')) {
+      this.parseMessageDirective(false, currentGraph);
+      return true;
     }
     if (this.matchWord('PREFIX')) {
       if (this.strictNTriples || this.strictNQuads) this.fail('Directives are not allowed in this format');
@@ -524,6 +607,22 @@ class CoreParser {
       return true;
     }
     return false;
+  }
+
+  private parseVersionDirective(needsDot: boolean): void {
+    this.skipWsAndComments();
+    this.version = this.readQuotedString();
+    if (isMessagesVersion(this.version)) this.messagesEnabled = true;
+    this.skipWsAndComments();
+    if (needsDot) this.expectChar(46, 'Expected . after version directive');
+  }
+
+  private parseMessageDirective(needsDot: boolean, currentGraph: TermLike): void {
+    if (!this.messagesEnabled) this.fail('RDF Messages are not enabled');
+    if (currentGraph.termType !== 'DefaultGraph') this.fail('Message delimiters are not allowed inside graph blocks');
+    this.skipWsAndComments();
+    if (needsDot) this.expectChar(46, 'Expected . after message directive');
+    this.finishMessage();
   }
 
   private parsePrefixDirective(needsDot: boolean): void {
@@ -678,12 +777,12 @@ class CoreParser {
       this.index++;
     }
     if (this.index === start) this.fail('Expected blank node label');
-    return this.factory.blankNode(this.input.slice(start, this.index));
+    return this.blankNodeFromLabel(this.input.slice(start, this.index));
   }
 
   private parseBlankNodePropertyList(graph: TermLike): BlankNodeLike {
     this.expectChar(91, 'Expected [');
-    const blank = this.factory.blankNode(`b${this.localBlankNodeCounter++}`);
+    const blank = this.createBlankNode(`b${this.localBlankNodeCounter++}`);
     this.skipWsAndComments();
     if (this.peekCharCode() === 93) {
       this.index++;
@@ -703,7 +802,7 @@ class CoreParser {
       return this.factory.namedNode(RDF_NIL);
     }
 
-    const head = this.factory.blankNode(`b${this.localBlankNodeCounter++}`);
+    const head = this.createBlankNode(`b${this.localBlankNodeCounter++}`);
     let current = head;
     while (true) {
       const item = this.parseObject(graph);
@@ -714,10 +813,37 @@ class CoreParser {
         this.addQuad(current, this.factory.namedNode(RDF_REST), this.factory.namedNode(RDF_NIL), graph);
         return head;
       }
-      const next = this.factory.blankNode(`b${this.localBlankNodeCounter++}`);
+      const next = this.createBlankNode(`b${this.localBlankNodeCounter++}`);
       this.addQuad(current, this.factory.namedNode(RDF_REST), next, graph);
       current = next;
     }
+  }
+
+  private blankNodeFromLabel(label: string): BlankNodeLike {
+    if (!this.messagesEnabled) return this.factory.blankNode(label);
+    const existing = this.blankNodeLabels.get(label);
+    if (existing) return existing;
+    const blank = this.createBlankNode(label);
+    this.blankNodeLabels.set(label, blank);
+    return blank;
+  }
+
+  private createBlankNode(label: string): BlankNodeLike {
+    return this.messagesEnabled ? this.factory.blankNode(`m${this.messageCounter}_${label}`) : this.factory.blankNode(label);
+  }
+
+  private finishMessage(): void {
+    this.messageCountHint = Math.max(this.messageCountHint, this.messageCounter + 1);
+    this.messageCounter++;
+    this.afterMessageDelimiter = true;
+    this.blankNodeLabels.clear();
+    this.localBlankNodeCounter = 0;
+  }
+
+  private finalizeEndOfFileMessage(): void {
+    if (!this.messagesEnabled) return;
+    if (!this.afterMessageDelimiter) this.messageCountHint = Math.max(this.messageCountHint, this.messageCounter + 1);
+    this.messageQuads.messageCount = this.messageCountHint;
   }
 
   private parseNumber(): LiteralLike {
@@ -913,6 +1039,10 @@ function resolveIri(value: string, baseIRI: string): string {
   }
 }
 
+function isMessagesVersion(version: string | undefined): boolean {
+  return typeof version === 'string' && version.toLowerCase().endsWith('-messages');
+}
+
 function isWs(code: number): boolean {
   return code === 32 || code === 9 || code === 10 || code === 13;
 }
@@ -1001,6 +1131,37 @@ export function termFromId(id: string): TermLike {
   const quad = parser.parse().quads[0];
   if (!quad) throw new Error(`Invalid term id: ${id}`);
   return quad.object;
+}
+
+export function isMessageQuad(value: unknown): value is MessageQuad {
+  return Boolean(value && typeof value === 'object' && 'quad' in value && 'messageCounter' in value);
+}
+
+export function toMessages(output: Iterable<ParserOutputItem>, messageCount?: number): Message[] {
+  const messages: Message[] = [];
+  const parsedMessageCount = messageCount ?? getMessageCount(output);
+  let sawMessageCounters = false;
+
+  for (const item of output) {
+    const entry = isMessageQuad(item) ? item : { quad: item, messageCounter: 0 };
+    sawMessageCounters ||= isMessageQuad(item);
+    while (messages.length <= entry.messageCounter) messages.push(new Message(messages.length));
+    messages[entry.messageCounter]!.push(entry.quad);
+  }
+
+  if (parsedMessageCount !== undefined) {
+    while (messages.length < parsedMessageCount) messages.push(new Message(messages.length));
+  } else if (!sawMessageCounters && messages.length === 0) {
+    return [];
+  }
+
+  return messages;
+}
+
+function getMessageCount(output: Iterable<ParserOutputItem>): number | undefined {
+  if (!Array.isArray(output) || !('messageCount' in output)) return undefined;
+  const value = (output as Partial<MessageQuadArray>).messageCount;
+  return typeof value === 'number' ? value : undefined;
 }
 
 export const namedNode = DataFactory.namedNode;
