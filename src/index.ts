@@ -1,4 +1,5 @@
 import { Transform, type TransformCallback, type TransformOptions, type Readable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 
 export type TermType = 'NamedNode' | 'BlankNode' | 'Literal' | 'Variable' | 'DefaultGraph' | 'Quad';
 
@@ -67,6 +68,20 @@ export interface MessageQuadArray extends Array<MessageQuad> {
 type EventCallbacks = {
   prefix?: (prefix: string, iri: NamedNodeLike) => void;
   comment?: (comment: string) => void;
+};
+
+type CoreParserState = {
+  prefixes: Record<string, NamedNodeLike>;
+  baseIRI: string;
+  version?: string;
+  messagesEnabled: boolean;
+  messageCounter: number;
+  messageCountHint: number;
+  afterMessageDelimiter: boolean;
+  localBlankNodeCounter: number;
+  line: number;
+  blankNodeLabels: Map<string, BlankNodeLike>;
+  namedNodeCache: Map<string, NamedNodeLike>;
 };
 
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
@@ -233,14 +248,143 @@ export class Parser {
   }
 }
 
+function createInitialCoreParserState(options: ParserOptions): CoreParserState {
+  return {
+    prefixes: Object.create(null) as Record<string, NamedNodeLike>,
+    baseIRI: options.baseIRI ?? options.baseIRIPath ?? '',
+    version: options.version,
+    messagesEnabled: options.rdfMessages === true || options.messages === true || isMessagesVersion(options.version),
+    messageCounter: 0,
+    messageCountHint: 0,
+    afterMessageDelimiter: false,
+    localBlankNodeCounter: 0,
+    line: 1,
+    blankNodeLabels: new Map<string, BlankNodeLike>(),
+    namedNodeCache: new Map<string, NamedNodeLike>(),
+  };
+}
+
+function findCompleteParseEnd(input: string): number {
+  let lastEnd = 0;
+  let graphDepth = 0;
+  let bracketDepth = 0;
+
+  for (let i = 0; i < input.length;) {
+    const code = input.charCodeAt(i);
+    if (code === 35) {
+      const end = scanCommentEnd(input, i);
+      if (end < 0) break;
+      i = end;
+      continue;
+    }
+    if (code === 34 || code === 39) {
+      const end = scanQuotedStringEnd(input, i);
+      if (end < 0) break;
+      i = end;
+      continue;
+    }
+    if (code === 60 && input.charCodeAt(i + 1) !== 60) {
+      const end = scanIriEnd(input, i);
+      if (end < 0) break;
+      i = end;
+      continue;
+    }
+
+    if (code === 123) graphDepth++;
+    else if (code === 125 && graphDepth > 0) graphDepth--;
+    else if (code === 91 || code === 40) bracketDepth++;
+    else if ((code === 93 || code === 41) && bracketDepth > 0) bracketDepth--;
+    else if (code === 46 && graphDepth === 0 && bracketDepth === 0 && isStatementDotBoundary(input, i)) {
+      const end = scanTrailingTriviaEnd(input, i + 1);
+      lastEnd = end;
+      i = end;
+      continue;
+    }
+
+    i++;
+  }
+
+  return lastEnd;
+}
+
+function scanCommentEnd(input: string, index: number): number {
+  for (let i = index + 1; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    if (code === 10) return i + 1;
+    if (code === 13) return input.charCodeAt(i + 1) === 10 ? i + 2 : i + 1;
+  }
+  return -1;
+}
+
+function scanQuotedStringEnd(input: string, index: number): number {
+  const quote = input.charCodeAt(index);
+  const triple = input.charCodeAt(index + 1) === quote && input.charCodeAt(index + 2) === quote;
+  let i = index + (triple ? 3 : 1);
+  while (i < input.length) {
+    const code = input.charCodeAt(i);
+    if (code === 92) {
+      if (i + 1 >= input.length) return -1;
+      i += 2;
+      continue;
+    }
+    if (code === quote) {
+      if (!triple) return i + 1;
+      if (input.charCodeAt(i + 1) === quote && input.charCodeAt(i + 2) === quote) return i + 3;
+    }
+    i++;
+  }
+  return -1;
+}
+
+function scanIriEnd(input: string, index: number): number {
+  for (let i = index + 1; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    if (code === 92) {
+      if (i + 1 >= input.length) return -1;
+      i++;
+      continue;
+    }
+    if (code === 62) return i + 1;
+  }
+  return -1;
+}
+
+function isStatementDotBoundary(input: string, index: number): boolean {
+  const next = input.charCodeAt(index + 1);
+  return !Number.isNaN(next) && (isWs(next) || next === 35);
+}
+
+function scanTrailingTriviaEnd(input: string, index: number): number {
+  let i = index;
+  while (i < input.length) {
+    const code = input.charCodeAt(i);
+    if (isWs(code)) {
+      i++;
+      continue;
+    }
+    if (code === 35) {
+      const end = scanCommentEnd(input, i);
+      if (end < 0) return i;
+      i = end;
+      continue;
+    }
+    break;
+  }
+  return i;
+}
+
 export class StreamParser extends Transform {
-  private readonly chunks: Buffer[] = [];
+  private readonly decoder = new StringDecoder('utf8');
   private readonly options: ParserOptions;
+  private parserState: CoreParserState;
+  private pending = '';
+  private atStart = true;
 
   public constructor(options: StreamParserOptions = {}) {
     const { baseIRI, baseIRIPath, format, factory, comments, relax, rdfMessages, messages, parseUnsupportedVersions, version, ...streamOptions } = options;
     super({ ...streamOptions, readableObjectMode: true });
     this.options = { baseIRI, baseIRIPath, format, factory, comments, relax, rdfMessages, messages, parseUnsupportedVersions, version };
+    this.parserState = createInitialCoreParserState(this.options);
   }
 
   public import(stream: Readable): this {
@@ -250,30 +394,59 @@ export class StreamParser extends Transform {
   }
 
   public override _transform(chunk: Buffer | string, encoding: BufferEncoding, callback: TransformCallback): void {
-    this.chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
-    callback();
-  }
-
-  public override _flush(callback: TransformCallback): void {
     try {
-      const input = Buffer.concat(this.chunks).toString('utf8');
-      const parser = new CoreParser(input, this.options, {
-        prefix: (prefix, iri) => this.emit('prefix', prefix, iri),
-        comment: comment => this.emit('comment', comment),
-      });
-      const result = parser.parse();
-      if (result.messagesEnabled) {
-        for (const entry of result.messageQuads) {
-          this.emit('messageCounter', entry.messageCounter, entry.quad);
-          this.push(entry);
-        }
-      } else {
-        for (const quad of result.quads) this.push(quad);
-      }
+      this.appendInput(this.decoder.write(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding)));
+      this.parsePending(false);
       callback();
     } catch (error) {
       callback(error instanceof Error ? error : new Error(String(error)));
     }
+  }
+
+  public override _flush(callback: TransformCallback): void {
+    try {
+      this.appendInput(this.decoder.end());
+      this.parsePending(true);
+      callback();
+    } catch (error) {
+      callback(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private appendInput(input: string): void {
+    if (!input) return;
+    if (this.atStart) {
+      this.atStart = false;
+      this.pending += input.charCodeAt(0) === 0xFEFF ? input.slice(1) : input;
+      return;
+    }
+    this.pending += input;
+  }
+
+  private parsePending(final: boolean): void {
+    const end = final ? this.pending.length : findCompleteParseEnd(this.pending);
+    if (end <= 0 && !final) return;
+
+    const input = final ? this.pending : this.pending.slice(0, end);
+    if (!input && !final) return;
+
+    const parser = new CoreParser(input, this.options, {
+      prefix: (prefix, iri) => this.emit('prefix', prefix, iri),
+      comment: comment => this.emit('comment', comment),
+    }, this.parserState);
+    const result = parser.parse(final);
+    this.parserState = parser.exportState();
+
+    if (result.messagesEnabled) {
+      for (const entry of result.messageQuads) {
+        this.emit('messageCounter', entry.messageCounter, entry.quad);
+        this.push(entry);
+      }
+    } else {
+      for (const quad of result.quads) this.push(quad);
+    }
+
+    this.pending = final ? '' : this.pending.slice(end);
   }
 }
 
@@ -281,9 +454,9 @@ class CoreParser {
   private readonly input: string;
   private readonly length: number;
   private index = 0;
-  private line = 1;
+  private line: number;
   private readonly factory: DataFactoryLike;
-  private readonly prefixes: Record<string, NamedNodeLike> = Object.create(null) as Record<string, NamedNodeLike>;
+  private readonly prefixes: Record<string, NamedNodeLike>;
   private readonly quads: QuadLike[] = [];
   private readonly messageQuads: MessageQuadArray = Object.assign([], { messageCount: 0 }) as MessageQuadArray;
   private readonly callbacks: EventCallbacks;
@@ -292,8 +465,8 @@ class CoreParser {
   private readonly allowLegacyTripleTerms: boolean;
   private readonly relax: boolean;
   private readonly defaultGraphTerm: DefaultGraphLike;
-  private readonly namedNodeCache = new Map<string, NamedNodeLike>();
-  private readonly blankNodeLabels = new Map<string, BlankNodeLike>();
+  private readonly namedNodeCache: Map<string, NamedNodeLike>;
+  private readonly blankNodeLabels: Map<string, BlankNodeLike>;
   private baseIRI: string;
   private version?: string;
   private messagesEnabled: boolean;
@@ -303,32 +476,56 @@ class CoreParser {
   private localBlankNodeCounter = 0;
   private fastEnd = 0;
 
-  public constructor(input: string, options: ParserOptions, callbacks: EventCallbacks) {
-    this.input = input.charCodeAt(0) === 0xFEFF ? input.slice(1) : input;
+  public constructor(input: string, options: ParserOptions, callbacks: EventCallbacks, state?: CoreParserState) {
+    this.input = state ? input : input.charCodeAt(0) === 0xFEFF ? input.slice(1) : input;
     this.length = this.input.length;
     this.factory = options.factory ?? DataFactory;
-    this.baseIRI = options.baseIRI ?? options.baseIRIPath ?? '';
+    this.prefixes = state?.prefixes ?? Object.create(null) as Record<string, NamedNodeLike>;
+    this.baseIRI = state?.baseIRI ?? options.baseIRI ?? options.baseIRIPath ?? '';
     this.callbacks = callbacks;
     this.relax = options.relax === true;
     this.defaultGraphTerm = this.factory.defaultGraph();
-    this.version = options.version;
-    this.messagesEnabled = options.rdfMessages === true || options.messages === true || isMessagesVersion(options.version);
+    this.version = state?.version ?? options.version;
+    this.messagesEnabled = state?.messagesEnabled ?? (options.rdfMessages === true || options.messages === true || isMessagesVersion(options.version));
+    this.messageCounter = state?.messageCounter ?? 0;
+    this.messageCountHint = state?.messageCountHint ?? 0;
+    this.afterMessageDelimiter = state?.afterMessageDelimiter ?? false;
+    this.localBlankNodeCounter = state?.localBlankNodeCounter ?? 0;
+    this.line = state?.line ?? 1;
+    this.blankNodeLabels = state?.blankNodeLabels ?? new Map<string, BlankNodeLike>();
+    this.namedNodeCache = state?.namedNodeCache ?? new Map<string, NamedNodeLike>();
     const format = (options.format ?? '').toLowerCase();
     this.strictNTriples = format.includes('n-triples');
     this.strictNQuads = format.includes('n-quads');
     this.allowLegacyTripleTerms = format.includes('*');
   }
 
-  public parse(): { quads: QuadLike[]; messageQuads: MessageQuadArray; prefixes: Record<string, NamedNodeLike>; messagesEnabled: boolean } {
+  public parse(final = true): { quads: QuadLike[]; messageQuads: MessageQuadArray; prefixes: Record<string, NamedNodeLike>; messagesEnabled: boolean } {
     while (true) {
       this.skipWsAndComments();
       if (this.index >= this.length) {
-        this.finalizeEndOfFileMessage();
+        if (final) this.finalizeEndOfFileMessage();
         return { quads: this.quads, messageQuads: this.messageQuads, prefixes: this.prefixes, messagesEnabled: this.messagesEnabled };
       }
       if ((this.strictNTriples || this.strictNQuads) && this.tryParseLineStatementFast()) continue;
       this.parseStatement(this.defaultGraphTerm);
     }
+  }
+
+  public exportState(): CoreParserState {
+    return {
+      prefixes: this.prefixes,
+      baseIRI: this.baseIRI,
+      version: this.version,
+      messagesEnabled: this.messagesEnabled,
+      messageCounter: this.messageCounter,
+      messageCountHint: this.messageCountHint,
+      afterMessageDelimiter: this.afterMessageDelimiter,
+      localBlankNodeCounter: this.localBlankNodeCounter,
+      line: this.line,
+      blankNodeLabels: this.blankNodeLabels,
+      namedNodeCache: this.namedNodeCache,
+    };
   }
 
   private tryParseLineStatementFast(): boolean {

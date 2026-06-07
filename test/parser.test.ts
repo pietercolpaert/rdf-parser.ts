@@ -10,6 +10,12 @@ function messageIds(messages: Message[]): string[][] {
   return messages.map(message => Array.from(message, quadToString));
 }
 
+async function writeChunk(parser: StreamParser, chunk: string | Buffer): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    parser.write(chunk, error => error ? reject(error) : resolve());
+  });
+}
+
 describe('Parser', () => {
   it('exports an N3-compatible parser constructor', () => {
     expect(Parser).toBeInstanceOf(Function);
@@ -92,6 +98,70 @@ describe('StreamParser', () => {
       '<http://example.org/a> <http://example.org/b> <http://example.org/c> .',
       '<http://example.org/d> <http://example.org/e> <http://example.org/f> .',
     ]);
+  });
+
+  it('emits complete statements before the stream ends', async () => {
+    const parser = new StreamParser({ baseIRI: 'http://example.org/' });
+    const output: string[] = [];
+    parser.on('data', quad => output.push(quadToString(quad)));
+
+    await writeChunk(parser, '<a> <b> <c>. ');
+    expect(output).toEqual(['<http://example.org/a> <http://example.org/b> <http://example.org/c> .']);
+
+    await writeChunk(parser, '<d> <e>');
+    expect(output).toEqual(['<http://example.org/a> <http://example.org/b> <http://example.org/c> .']);
+
+    await writeChunk(parser, ' <f>. ');
+    expect(output).toEqual([
+      '<http://example.org/a> <http://example.org/b> <http://example.org/c> .',
+      '<http://example.org/d> <http://example.org/e> <http://example.org/f> .',
+    ]);
+
+    await new Promise<void>((resolve, reject) => {
+      parser.on('error', reject);
+      parser.on('end', resolve);
+      parser.end();
+    });
+  });
+
+  it('preserves parser state across incremental stream parses', async () => {
+    const parser = new StreamParser();
+    const prefixes: string[] = [];
+    const output: string[] = [];
+    parser.on('prefix', prefix => prefixes.push(prefix));
+    parser.on('data', quad => output.push(quadToString(quad)));
+
+    await writeChunk(parser, '@prefix ex: <http://example.com/>. ');
+    expect(prefixes).toEqual(['ex']);
+    expect(output).toEqual([]);
+
+    await writeChunk(parser, 'ex:s ex:p ex:o. ');
+    expect(output).toEqual(['<http://example.com/s> <http://example.com/p> <http://example.com/o> .']);
+
+    await new Promise<void>((resolve, reject) => {
+      parser.on('error', reject);
+      parser.on('end', resolve);
+      parser.end();
+    });
+  });
+
+  it('decodes UTF-8 characters split across chunks', async () => {
+    const parser = new StreamParser({ baseIRI: 'http://example.org/' });
+    const output: string[] = [];
+    const input = Buffer.from('<s> <p> "café". ', 'utf8');
+    const split = input.indexOf(0xC3) + 1;
+    parser.on('data', quad => output.push(quadToString(quad)));
+
+    await writeChunk(parser, input.subarray(0, split));
+    expect(output).toEqual([]);
+    await writeChunk(parser, input.subarray(split));
+    expect(output).toEqual(['<http://example.org/s> <http://example.org/p> "café" .']);
+
+    await new Promise<void>((resolve, reject) => {
+      parser.on('error', reject);
+      parser.on('end', resolve);
+      parser.end();
+    });
   });
 
   it('emits prefix and comment events', async () => {

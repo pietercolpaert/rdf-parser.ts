@@ -367,7 +367,7 @@ The benchmark prints elapsed time, throughput, input size, and RSS delta for thi
 - The fast path caches recurring predicate, datatype, and graph named nodes in a bounded cache.
 - A `relax: true` option mirrors Graphy's relaxed mode by skipping part of the validation cost on hot line-format paths; spec tests use strict validation by default.
 - The default data model has small classes with simple `equals()` implementations.
-- `StreamParser` currently buffers chunks before parsing to preserve parser hot-path simplicity; incremental parsing can be added later without changing the public API.
+- `StreamParser` incrementally parses complete statement prefixes and only retains incomplete trailing input between chunks; very large single statements still need to be held until their terminating boundary arrives.
 - Runtime dependencies are avoided for the library itself; dependencies are development/test/benchmark-only.
 
 ## License
