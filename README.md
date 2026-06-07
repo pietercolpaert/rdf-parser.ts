@@ -53,9 +53,11 @@ npm run build        # Build CommonJS, ESM, declarations, and the CLI
 npm run lint         # Type-check with tsc --noEmit
 npm test             # Run unit tests
 npm run check        # Type-check, build, then test
+npm run ci           # Run check plus the quick performance regression warning check
 npm run spec         # Run RDF 1.1 and RDF1.2 spec suites
 npm run perf         # Benchmark 10⁴, 10⁵, and 10⁶ generated quads/triples
 npm run perf:quick   # Smaller benchmark for local iteration
+npm run perf:regression # Compare current build to a git baseline and warn on >20% throughput drops
 npm run perf:graphy  # Graphy-compatible benchmark without RDF1.2 triple terms
 ```
 

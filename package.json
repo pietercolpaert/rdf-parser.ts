@@ -51,6 +51,7 @@
     "test:watch": "vitest",
     "lint": "tsc --noEmit",
     "check": "npm run lint && npm run build && npm test",
+    "ci": "npm run check && npm run perf:regression",
     "prepare": "npm run build",
     "spec": "npm run build && npm run spec-1-1 && npm run spec-1-2",
     "spec-1-1": "npm run spec-1-1-turtle && npm run spec-1-1-ntriples && npm run spec-1-1-nquads && npm run spec-1-1-trig",
@@ -76,6 +77,7 @@
     "spec-clean": "rm -rf .rdf-test-suite-cache/",
     "perf": "npm run build && node perf/bench.js",
     "perf:quick": "npm run build && node perf/bench.js --sizes 1000,10000",
+    "perf:regression": "npm run build && node --expose-gc perf/regression.js",
     "perf:graphy": "npm run build && node perf/bench.js --no-triple-terms"
   },
   "dependencies": {
