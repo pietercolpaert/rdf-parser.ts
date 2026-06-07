@@ -2,14 +2,14 @@
 
 [![W3C RDF1.2 spec compliance](https://github.com/pietercolpaert/rdf-parser.ts/actions/workflows/ci.yml/badge.svg)](https://github.com/pietercolpaert/rdf-parser.ts/actions/workflows/ci.yml)
 
-Fast RDF-JS parsing for Turtle, N-Triples, N-Quads, and TriG for the browser and NodeJS. Try the interactive browser demo at [https://rdf-parser-ts.github.io/example](https://rdf-parser-ts.github.io/example).
+Fast RDF-JS parsing for Turtle, N-Triples, N-Quads, and TriG for the browser and NodeJS. Try the interactive browser demo at [https://www.pieter.pm/rdf-parser.ts/](https://www.pieter.pm/rdf-parser.ts/)
 
 The package exposes an Comunica-compatible `Parser` and `StreamParser` API so it can be evaluated as a replacement for N3.js in consumers such as Comunica's `actor-rdf-parse-n3`.
 
 The implementation is intentionally compact: the hot path is a single scanner/parser that avoids reusable lexer abstractions, token object allocation, and runtime dependency overhead. Public APIs stay RDF-JS-compatible while parser internals remain optimized for machine-generated maintenance.
 
 > [!NOTE]  
-> I’ve built this as an agentic coding test for myself. I’m happy to see spec compliance, messages support, and a great performance increase over N3.js, but integration tests with other software will need to point out whether this work is indeed as maintainable and useful as other libraries. This built would not have been possible without the work of Blake Regalia on Graphy and Ruben Verborgh on N3.js.
+> I built this as an agentic coding experiment for myself. I’m happy to see spec compliance, messages support, and a significant performance improvement over N3.js, but integration tests with other software will need to show whether this work is as maintainable and useful as other libraries. This project would not have been possible without Blake Regalia’s work on Graphy and Ruben Verborgh’s work on N3.js.
 
 ## Supported formats
 
