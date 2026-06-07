@@ -31,7 +31,7 @@
       "require": "./dist/index.js"
     },
     "./browser": {
-      "types": "./dist/index.d.ts",
+      "types": "./dist/browser/index.d.ts",
       "import": "./dist/browser/index.mjs",
       "default": "./dist/browser/index.mjs"
     }

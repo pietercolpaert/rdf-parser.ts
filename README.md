@@ -74,7 +74,7 @@ The package exports CommonJS, ESM, and browser builds:
 }
 ```
 
-The browser bundle is minified and intended for string parsing with `Parser`. `StreamParser` remains Node.js stream-specific and throws a clear error when constructed from the browser bundle.
+The browser bundle is minified and supports string parsing with `Parser` plus Web Streams parsing with `StreamParser`. The Node.js build keeps the Node `Transform`-based `StreamParser`; the browser build exposes a Web Streams-compatible `StreamParser` with `readable` and `writable` properties.
 
 ## Browser usage and bundle size
 
@@ -109,14 +109,29 @@ Or use the minified global bundle, which exposes `RDFParserTS`:
 </script>
 ```
 
-The browser build follows the same package-shipping idea as N3.js—publish a prebuilt minified browser artifact—but uses a browser-specific entry and `sideEffects: false` so bundlers can avoid pulling Node stream code into browser builds.
+For streaming in browsers, `StreamParser` works with Web Streams. It can be passed to `pipeThrough()` or used through its `import()` convenience method:
+
+```ts
+import { StreamParser, quadToString } from 'rdf-parser-ts/browser';
+
+const parser = new StreamParser({ baseIRI: 'https://example.org/' });
+const rdfStream = new Blob(['<s> <p>', ' <o>.']).stream();
+
+for await (const quad of rdfStream.pipeThrough(parser)) {
+  console.log(quadToString(quad));
+}
+```
+
+The browser `StreamParser` accepts string, `Uint8Array`, and `ArrayBuffer` chunks, emits RDF-JS quads, and supports `prefix`, `comment`, and `messageCounter` listeners with `on()` or `addEventListener()`.
+
+The browser build follows the same package-shipping idea as N3.js—publish a prebuilt minified browser artifact—but uses a browser-specific entry and `sideEffects: false` so bundlers avoid pulling Node stream code into browser builds.
 
 Current browser bundle sizes after `npm run build`:
 
 | Bundle | Raw | gzip |
 | --- | ---: | ---: |
-| `dist/browser/index.mjs` | 24,559 bytes (24.0 KiB) | 6,692 bytes (6.5 KiB) |
-| `dist/browser/index.global.js` | 25,040 bytes (24.5 KiB) | 6,890 bytes (6.7 KiB) |
+| `dist/browser/index.mjs` | 27,665 bytes (27.0 KiB) | 7,596 bytes (7.4 KiB) |
+| `dist/browser/index.global.js` | 28,147 bytes (27.5 KiB) | 7,792 bytes (7.6 KiB) |
 
 ## Parsing strings
 

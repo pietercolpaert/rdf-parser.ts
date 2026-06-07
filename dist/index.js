@@ -23,6 +23,7 @@ __export(index_exports, {
   BlankNode: () => BlankNode,
   DataFactory: () => DataFactory,
   DefaultGraph: () => DefaultGraph,
+  IncrementalParser: () => IncrementalParser,
   Literal: () => Literal,
   Message: () => Message,
   NamedNode: () => NamedNode,
@@ -333,6 +334,46 @@ function scanTrailingTriviaEnd(input, index) {
   }
   return i;
 }
+var IncrementalParser = class {
+  constructor(options = {}, callbacks = {}) {
+    this.options = options;
+    this.callbacks = callbacks;
+    this.parserState = createInitialCoreParserState(options);
+  }
+  options;
+  callbacks;
+  parserState;
+  pending = "";
+  atStart = true;
+  write(input) {
+    this.appendInput(input);
+    return this.parsePending(false);
+  }
+  end(input = "") {
+    this.appendInput(input);
+    return this.parsePending(true);
+  }
+  appendInput(input) {
+    if (!input) return;
+    if (this.atStart) {
+      this.atStart = false;
+      this.pending += input.charCodeAt(0) === 65279 ? input.slice(1) : input;
+      return;
+    }
+    this.pending += input;
+  }
+  parsePending(final) {
+    const end = final ? this.pending.length : findCompleteParseEnd(this.pending);
+    if (end <= 0 && !final) return [];
+    const input = final ? this.pending : this.pending.slice(0, end);
+    if (!input && !final) return [];
+    const parser = new CoreParser(input, this.options, this.callbacks, this.parserState);
+    const result = parser.parse(final);
+    this.parserState = parser.exportState();
+    this.pending = final ? "" : this.pending.slice(end);
+    return result.messagesEnabled ? [...result.messageQuads] : [...result.quads];
+  }
+};
 var StreamParser = class extends import_node_stream.Transform {
   decoder = new import_node_string_decoder.StringDecoder("utf8");
   options;
@@ -1260,6 +1301,7 @@ var quad = DataFactory.quad;
   BlankNode,
   DataFactory,
   DefaultGraph,
+  IncrementalParser,
   Literal,
   Message,
   NamedNode,

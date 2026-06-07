@@ -64,6 +64,10 @@ type ParseCallback = (error: Error | null, quad?: QuadLike | null, prefixes?: Re
 interface MessageQuadArray extends Array<MessageQuad> {
     messageCount: number;
 }
+type ParserEventCallbacks = {
+    prefix?: (prefix: string, iri: NamedNodeLike) => void;
+    comment?: (comment: string) => void;
+};
 declare class NamedNode implements NamedNodeLike {
     readonly value: string;
     readonly termType: "NamedNode";
@@ -120,6 +124,18 @@ declare class Parser {
     parse(input: string, callback?: ParseCallback): ParserOutput | undefined;
     parseMessages(input: string): Message[];
 }
+declare class IncrementalParser {
+    private readonly options;
+    private readonly callbacks;
+    private parserState;
+    private pending;
+    private atStart;
+    constructor(options?: ParserOptions, callbacks?: ParserEventCallbacks);
+    write(input: string): ParserOutputItem[];
+    end(input?: string): ParserOutputItem[];
+    private appendInput;
+    private parsePending;
+}
 declare class StreamParser extends Transform {
     private readonly decoder;
     private readonly options;
@@ -146,4 +162,4 @@ declare const variable: ((value: string) => VariableLike) | undefined;
 declare const defaultGraph: () => DefaultGraphLike;
 declare const quad: (subject: TermLike, predicate: TermLike, object: TermLike, graph?: TermLike) => QuadLike;
 
-export { BlankNode, type BlankNodeLike, DataFactory, type DataFactoryLike, DefaultGraph, type DefaultGraphLike, Literal, type LiteralLike, Message, type MessageQuad, type MessageQuadArray, NamedNode, type NamedNodeLike, type ParseCallback, Parser, type ParserOptions, type ParserOutput, type ParserOutputItem, Quad, type QuadLike, StreamParser, type StreamParserOptions, type Term, type TermLike, type TermType, Variable, type VariableLike, blankNode, defaultGraph, isMessageQuad, literal, namedNode, quad, quadToString, termFromId, termToId, termToString, toMessages, variable };
+export { BlankNode, type BlankNodeLike, DataFactory, type DataFactoryLike, DefaultGraph, type DefaultGraphLike, IncrementalParser, Literal, type LiteralLike, Message, type MessageQuad, type MessageQuadArray, NamedNode, type NamedNodeLike, type ParseCallback, Parser, type ParserEventCallbacks, type ParserOptions, type ParserOutput, type ParserOutputItem, Quad, type QuadLike, StreamParser, type StreamParserOptions, type Term, type TermLike, type TermType, Variable, type VariableLike, blankNode, defaultGraph, isMessageQuad, literal, namedNode, quad, quadToString, termFromId, termToId, termToString, toMessages, variable };

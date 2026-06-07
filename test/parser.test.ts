@@ -1,6 +1,7 @@
 import { Readable, Writable } from 'node:stream';
 import { describe, expect, it } from 'vitest';
 import { DataFactory, Message, Parser, StreamParser, isMessageQuad, quadToString, termFromId, termToString, toMessages, type MessageQuad, type QuadLike } from '../src';
+import { StreamParser as BrowserStreamParser } from '../src/browser';
 
 function ids(input: string, baseIRI = 'http://example.org/'): string[] {
   return ((new Parser({ baseIRI }).parse(input) ?? []) as QuadLike[]).map(quadToString);
@@ -180,6 +181,80 @@ describe('StreamParser', () => {
 
     expect(prefixes).toEqual(['ex']);
     expect(comments).toEqual([' hi']);
+  });
+});
+
+describe('Browser StreamParser', () => {
+  async function collect(stream: ReadableStream<unknown>): Promise<unknown[]> {
+    const output: unknown[] = [];
+    const reader = stream.getReader();
+    while (true) {
+      const result = await reader.read();
+      if (result.done) break;
+      output.push(result.value);
+    }
+    return output;
+  }
+
+  it('parses Web Streams incrementally', async () => {
+    const parser = new BrowserStreamParser({ baseIRI: 'http://example.org/' });
+    const input = new ReadableStream<string>({
+      start(controller) {
+        controller.enqueue('<a> <b>');
+        controller.enqueue(' <c>.\n');
+        controller.enqueue('<d> <e> <f>.');
+        controller.close();
+      },
+    });
+
+    const output = await collect(parser.import(input));
+    expect(output.map(quad => quadToString(quad as QuadLike))).toEqual([
+      '<http://example.org/a> <http://example.org/b> <http://example.org/c> .',
+      '<http://example.org/d> <http://example.org/e> <http://example.org/f> .',
+    ]);
+  });
+
+  it('preserves prefixes and decodes split UTF-8 byte chunks', async () => {
+    const prefixes: string[] = [];
+    const parser = new BrowserStreamParser({ baseIRI: 'http://example.org/' });
+    parser.on('prefix', prefix => prefixes.push(prefix));
+
+    const input = new TextEncoder().encode('@prefix ex: <http://example.com/>. ex:s ex:p "café".');
+    const split = input.indexOf(0xC3) + 1;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(input.subarray(0, split));
+        controller.enqueue(input.subarray(split));
+        controller.close();
+      },
+    });
+
+    const output = await collect(parser.import(stream));
+    expect(prefixes).toEqual(['ex']);
+    expect(output.map(quad => quadToString(quad as QuadLike))).toEqual([
+      '<http://example.com/s> <http://example.com/p> "café" .',
+    ]);
+  });
+
+  it('emits message counters in browser Web Streams', async () => {
+    const counters: number[] = [];
+    const parser = new BrowserStreamParser({ baseIRI: 'http://example.org/' });
+    parser.addEventListener('messageCounter', counter => counters.push(counter));
+    const stream = new ReadableStream<string>({
+      start(controller) {
+        controller.enqueue('VERSION "1.2-messages"\n<s1> <p> <o1> .\n');
+        controller.enqueue('MESSAGE\n<s2> <p> <o2> .');
+        controller.close();
+      },
+    });
+
+    const output = await collect(parser.import(stream));
+    expect(counters).toEqual([0, 1]);
+    expect(output.every(isMessageQuad)).toBe(true);
+    expect((output as MessageQuad[]).map(entry => quadToString(entry.quad))).toEqual([
+      '<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .',
+      '<http://example.org/s2> <http://example.org/p> <http://example.org/o2> .',
+    ]);
   });
 });
 

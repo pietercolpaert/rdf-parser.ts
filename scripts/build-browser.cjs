@@ -44,6 +44,10 @@ async function build() {
       outfile: path.join(outdir, 'index.global.js'),
     }),
   ]);
+
+  const declarations = `export {\n  BlankNode,\n  DataFactory,\n  DefaultGraph,\n  IncrementalParser,\n  Literal,\n  Message,\n  NamedNode,\n  Parser,\n  Quad,\n  Variable,\n  blankNode,\n  defaultGraph,\n  isMessageQuad,\n  literal,\n  namedNode,\n  quad,\n  quadToString,\n  termFromId,\n  termToId,\n  termToString,\n  toMessages,\n  variable,\n} from '../index';\n\nexport type {\n  BlankNodeLike,\n  DataFactoryLike,\n  DefaultGraphLike,\n  LiteralLike,\n  MessageQuad,\n  MessageQuadArray,\n  NamedNodeLike,\n  ParseCallback,\n  ParserEventCallbacks,\n  ParserOptions,\n  ParserOutput,\n  ParserOutputItem,\n  QuadLike,\n  StreamParserOptions,\n  Term,\n  TermLike,\n  TermType,\n  VariableLike,\n} from '../index';\n\nimport type { NamedNodeLike, ParserOutputItem, QuadLike, StreamParserOptions } from '../index';\n\ntype BrowserStreamChunk = string | Uint8Array | ArrayBuffer;\n\nexport declare class StreamParser {\n  readonly readable: ReadableStream<ParserOutputItem>;\n  readonly writable: WritableStream<BrowserStreamChunk>;\n  constructor(options?: StreamParserOptions);\n  import(stream: ReadableStream<BrowserStreamChunk>): ReadableStream<ParserOutputItem>;\n  on(event: 'prefix', listener: (prefix: string, iri: NamedNodeLike) => void): this;\n  on(event: 'comment', listener: (comment: string) => void): this;\n  on(event: 'messageCounter', listener: (counter: number, quad: QuadLike) => void): this;\n  addEventListener(event: 'prefix', listener: (prefix: string, iri: NamedNodeLike) => void): this;\n  addEventListener(event: 'comment', listener: (comment: string) => void): this;\n  addEventListener(event: 'messageCounter', listener: (counter: number, quad: QuadLike) => void): this;\n}\n`;
+  fs.writeFileSync(path.join(outdir, 'index.d.ts'), declarations);
+  fs.writeFileSync(path.join(outdir, 'index.d.mts'), declarations);
 }
 
 build().catch(error => {

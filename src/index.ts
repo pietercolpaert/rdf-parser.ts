@@ -65,7 +65,7 @@ export interface MessageQuadArray extends Array<MessageQuad> {
   messageCount: number;
 }
 
-type EventCallbacks = {
+export type ParserEventCallbacks = {
   prefix?: (prefix: string, iri: NamedNodeLike) => void;
   comment?: (comment: string) => void;
 };
@@ -373,6 +373,54 @@ function scanTrailingTriviaEnd(input: string, index: number): number {
   return i;
 }
 
+export class IncrementalParser {
+  private parserState: CoreParserState;
+  private pending = '';
+  private atStart = true;
+
+  public constructor(
+    private readonly options: ParserOptions = {},
+    private readonly callbacks: ParserEventCallbacks = {},
+  ) {
+    this.parserState = createInitialCoreParserState(options);
+  }
+
+  public write(input: string): ParserOutputItem[] {
+    this.appendInput(input);
+    return this.parsePending(false);
+  }
+
+  public end(input = ''): ParserOutputItem[] {
+    this.appendInput(input);
+    return this.parsePending(true);
+  }
+
+  private appendInput(input: string): void {
+    if (!input) return;
+    if (this.atStart) {
+      this.atStart = false;
+      this.pending += input.charCodeAt(0) === 0xFEFF ? input.slice(1) : input;
+      return;
+    }
+    this.pending += input;
+  }
+
+  private parsePending(final: boolean): ParserOutputItem[] {
+    const end = final ? this.pending.length : findCompleteParseEnd(this.pending);
+    if (end <= 0 && !final) return [];
+
+    const input = final ? this.pending : this.pending.slice(0, end);
+    if (!input && !final) return [];
+
+    const parser = new CoreParser(input, this.options, this.callbacks, this.parserState);
+    const result = parser.parse(final);
+    this.parserState = parser.exportState();
+    this.pending = final ? '' : this.pending.slice(end);
+
+    return result.messagesEnabled ? [...result.messageQuads] : [...result.quads];
+  }
+}
+
 export class StreamParser extends Transform {
   private readonly decoder = new StringDecoder('utf8');
   private readonly options: ParserOptions;
@@ -459,7 +507,7 @@ class CoreParser {
   private readonly prefixes: Record<string, NamedNodeLike>;
   private readonly quads: QuadLike[] = [];
   private readonly messageQuads: MessageQuadArray = Object.assign([], { messageCount: 0 }) as MessageQuadArray;
-  private readonly callbacks: EventCallbacks;
+  private readonly callbacks: ParserEventCallbacks;
   private readonly strictNTriples: boolean;
   private readonly strictNQuads: boolean;
   private readonly allowLegacyTripleTerms: boolean;
@@ -476,7 +524,7 @@ class CoreParser {
   private localBlankNodeCounter = 0;
   private fastEnd = 0;
 
-  public constructor(input: string, options: ParserOptions, callbacks: EventCallbacks, state?: CoreParserState) {
+  public constructor(input: string, options: ParserOptions, callbacks: ParserEventCallbacks, state?: CoreParserState) {
     this.input = state ? input : input.charCodeAt(0) === 0xFEFF ? input.slice(1) : input;
     this.length = this.input.length;
     this.factory = options.factory ?? DataFactory;
