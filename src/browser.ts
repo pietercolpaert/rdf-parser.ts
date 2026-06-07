@@ -34,22 +34,24 @@ export type {
   MessageQuadArray,
   NamedNodeLike,
   ParseCallback,
+  ParserEventCallbacks,
   ParserOptions,
   ParserOutput,
   ParserOutputItem,
   QuadLike,
-  StreamParserOptions,
   Term,
   TermLike,
   TermType,
   VariableLike,
 } from './index';
 
-import type { MessageQuad, NamedNodeLike, ParserOutputItem, QuadLike, StreamParserOptions } from './index';
+import type { MessageQuad, NamedNodeLike, ParserOptions, ParserOutputItem, QuadLike } from './index';
 
 type BrowserStreamChunk = string | Uint8Array | ArrayBuffer;
 type BrowserStreamEvent = 'prefix' | 'comment' | 'messageCounter';
 type BrowserStreamListener = (...args: any[]) => void;
+
+export type StreamParserOptions = ParserOptions;
 
 export class StreamParser {
   public readonly readable: ReadableStream<ParserOutputItem>;

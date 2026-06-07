@@ -37,16 +37,17 @@ export type {
   ParserOutput,
   ParserOutputItem,
   QuadLike,
-  StreamParserOptions,
   Term,
   TermLike,
   TermType,
   VariableLike,
 } from '../index';
 
-import type { NamedNodeLike, ParserOutputItem, QuadLike, StreamParserOptions } from '../index';
+import type { NamedNodeLike, ParserOptions, ParserOutputItem, QuadLike } from '../index';
 
 type BrowserStreamChunk = string | Uint8Array | ArrayBuffer;
+
+export type StreamParserOptions = ParserOptions;
 
 export declare class StreamParser {
   readonly readable: ReadableStream<ParserOutputItem>;
