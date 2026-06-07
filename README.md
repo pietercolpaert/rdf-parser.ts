@@ -2,14 +2,14 @@
 
 [![W3C RDF1.2 spec compliance](https://github.com/pietercolpaert/rdf-parser.ts/actions/workflows/ci.yml/badge.svg)](https://github.com/pietercolpaert/rdf-parser.ts/actions/workflows/ci.yml)
 
-Fast RDF-JS parsing for Turtle, N-Triples, N-Quads, and TriG.
+Fast RDF-JS parsing for Turtle, N-Triples, N-Quads, and TriG for the browser and NodeJS. Try the interactive browser demo at [https://rdf-parser-ts.github.io/example](https://rdf-parser-ts.github.io/example).
 
 The package exposes an Comunica-compatible `Parser` and `StreamParser` API so it can be evaluated as a replacement for N3.js in consumers such as Comunica's `actor-rdf-parse-n3`.
 
 The implementation is intentionally compact: the hot path is a single scanner/parser that avoids reusable lexer abstractions, token object allocation, and runtime dependency overhead. Public APIs stay RDF-JS-compatible while parser internals remain optimized for machine-generated maintenance.
 
 > [!NOTE]  
-> I’ve built this as an agentic coding test for myself. I’m happy to see spec compliance, messages support, and a great performance increase over N3.js, but integration tests with other software will need to point out whether this work is indeed as maintainable and useful as other libraries.
+> I’ve built this as an agentic coding test for myself. I’m happy to see spec compliance, messages support, and a great performance increase over N3.js, but integration tests with other software will need to point out whether this work is indeed as maintainable and useful as other libraries. This built would not have been possible without the work of Blake Regalia on Graphy and Ruben Verborgh on N3.js.
 
 ## Supported formats
 
@@ -139,6 +139,8 @@ Current browser bundle sizes after `npm run build`:
 | --- | ---: | ---: |
 | `dist/browser/index.mjs` | 36,229 bytes (35.4 KiB) | 9,869 bytes (9.6 KiB) |
 | `dist/browser/index.global.js` | 36,712 bytes (35.9 KiB) | 10,058 bytes (9.8 KiB) |
+
+The `example/` folder contains a browser-only parser and writer demo. It accepts a URL or pasted RDF text, auto-detects the input format from URL, content type, or syntax hints, serializes the parsed data in the selected output format, and reports quads/messages per second while processing.
 
 ## Parsing strings
 
