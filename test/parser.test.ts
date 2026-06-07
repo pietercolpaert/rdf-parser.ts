@@ -56,6 +56,16 @@ describe('Parser', () => {
     ]);
   });
 
+  it('allows graph blocks to end without a final triple dot', () => {
+    expect(ids('@prefix ex: <http://example.com/>. ex:g { ex:s ex:p ex:o } ex:s2 ex:p ex:o.')).toEqual([
+      '<http://example.com/s> <http://example.com/p> <http://example.com/o> <http://example.com/g> .',
+      '<http://example.com/s2> <http://example.com/p> <http://example.com/o> .',
+    ]);
+    expect(ids('@prefix ex: <http://example.com/>. { ex:s ex:p ex:o }')).toEqual([
+      '<http://example.com/s> <http://example.com/p> <http://example.com/o> .',
+    ]);
+  });
+
   it('supports an RDF-JS factory override', () => {
     const quads = (new Parser({ factory: DataFactory }).parse('<s> <p> "o" .') ?? []) as QuadLike[];
     expect(quads[0]?.subject.termType).toBe('NamedNode');

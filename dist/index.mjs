@@ -1025,7 +1025,7 @@ var CoreParser = class {
     if (this.namedNodeCache.size < 4096) this.namedNodeCache.set(value, node);
     return node;
   }
-  parseStatement(defaultGraph2) {
+  parseStatement(defaultGraph2, allowGraphCloseTerminator = false) {
     this.skipWsAndComments();
     if (this.parseDirective(defaultGraph2)) return;
     if (this.peekCharCode() === 123) {
@@ -1048,7 +1048,7 @@ var CoreParser = class {
       this.parseGraphStatements(subjectOrGraph);
       return;
     }
-    this.parsePredicateObjectList(subjectOrGraph, defaultGraph2);
+    this.parsePredicateObjectList(subjectOrGraph, defaultGraph2, 46, allowGraphCloseTerminator);
   }
   parseGraphStatements(graph) {
     while (true) {
@@ -1060,17 +1060,17 @@ var CoreParser = class {
         if (this.peekCharCode() === 46) this.index++;
         return;
       }
-      this.parseStatement(graph);
+      this.parseStatement(graph, true);
     }
   }
-  parsePredicateObjectList(subject, graph, terminatorCode = 46) {
+  parsePredicateObjectList(subject, graph, terminatorCode = 46, allowGraphCloseTerminator = false) {
     while (true) {
       const predicate = this.parsePredicate(graph);
       this.skipWsAndComments();
       while (true) {
         const object = this.parseObject(graph);
         this.skipWsAndComments();
-        if (terminatorCode === 46 && graph.termType === "DefaultGraph" && this.canStartTerm() && !this.nextIsStatementBoundary()) {
+        if (terminatorCode === 46 && !allowGraphCloseTerminator && graph.termType === "DefaultGraph" && this.canStartTerm() && !this.nextIsStatementBoundary()) {
           if (this.strictNTriples) this.fail("Graph terms are not allowed in N-Triples");
           const explicitGraph = this.parseNamedOrBlankTerm(graph);
           this.addQuad(subject, predicate, object, explicitGraph);
@@ -1088,8 +1088,9 @@ var CoreParser = class {
       if (this.strictNTriples || this.strictNQuads) this.fail("Predicate lists are not allowed in this format");
       this.index++;
       this.skipWsAndComments();
-      if (this.peekCharCode() === terminatorCode) break;
+      if (this.peekCharCode() === terminatorCode || allowGraphCloseTerminator && this.peekCharCode() === 125) break;
     }
+    if (allowGraphCloseTerminator && this.peekCharCode() === 125) return;
     if (terminatorCode === 46) this.expectChar(46, "Expected . after triple");
     else if (this.peekCharCode() !== terminatorCode) this.fail(`Expected ${String.fromCharCode(terminatorCode)} after property list`);
   }
