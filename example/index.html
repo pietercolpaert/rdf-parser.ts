@@ -336,7 +336,7 @@ ex:m2 ex:p ex:o2 .</textarea>
           if (!response.ok) throw new Error(`Fetch failed with HTTP ${response.status}.`);
           detected = detectFormat({ url: response.url || sourceUrl, contentType: response.headers.get('content-type') || '' });
           metrics.detectedFormat.textContent = detected.label;
-          const parserOptions = createParserOptions(detected.format, response.url || sourceUrl);
+          const parserOptions = createParserOptions(detected, response.url || sourceUrl);
           if (response.body) {
             status.textContent = 'Streaming and parsing…';
             await readStream(response.body, parserOptions, start, items);
@@ -344,7 +344,7 @@ ex:m2 ex:p ex:o2 .</textarea>
             const text = await response.text();
             detected = detectFormat({ url: response.url || sourceUrl, contentType: response.headers.get('content-type') || '', text });
             metrics.detectedFormat.textContent = detected.label;
-            parseText(text, createParserOptions(detected.format, response.url || sourceUrl), items);
+            parseText(text, createParserOptions(detected, response.url || sourceUrl), items);
             updateMetrics(start, items);
           }
         } else {
@@ -354,19 +354,20 @@ ex:m2 ex:p ex:o2 .</textarea>
           metrics.detectedFormat.textContent = detected.label;
           status.textContent = 'Streaming and parsing text…';
           await nextFrame();
-          await readStream(new Blob([text]).stream(), createParserOptions(detected.format, ''), start, items);
+          await readStream(new Blob([text]).stream(), createParserOptions(detected, ''), start, items);
         }
 
         status.textContent = 'Serializing output…';
         await nextFrame();
-        latestOutput = await serialize(items, outputFormat.value);
+        const writerOptions = createWriterOptions(detected, outputFormat.value);
+        latestOutput = await serialize(items, writerOptions);
         output.textContent = latestOutput;
         latestDemoCode = createDemoCode({
           sourceMode,
           sourceUrl,
           text: sourceMode === 'text' ? textInput.value : '',
-          parserOptions: createParserOptions(detected.format, sourceMode === 'url' ? sourceUrl : ''),
-          writerOptions: { format: outputFormat.value },
+          parserOptions: createParserOptions(detected, sourceMode === 'url' ? sourceUrl : ''),
+          writerOptions,
         });
         demoCode.textContent = latestDemoCode;
         updateMetrics(start, items);
@@ -397,21 +398,71 @@ ex:m2 ex:p ex:o2 .</textarea>
       const lowerUrl = url.toLowerCase().split(/[?#]/, 1)[0];
       const lowerType = contentType.toLowerCase();
       const sample = text.slice(0, 4096).trimStart();
-      if (lowerType.includes('n-quads') || lowerUrl.endsWith('.nq')) return { format: 'N-Quads', label: 'N-Quads' };
-      if (lowerType.includes('n-triples') || lowerUrl.endsWith('.nt')) return { format: 'N-Triples', label: 'N-Triples' };
-      if (lowerType.includes('trig') || lowerUrl.endsWith('.trig')) return { format: 'TriG', label: 'TriG' };
-      if (lowerType.includes('turtle') || lowerType.includes('text/n3') || lowerUrl.endsWith('.ttl') || lowerUrl.endsWith('.n3')) return { format: undefined, label: 'Turtle/TriG' };
-      if (/^(?:VERSION|MESSAGE)\b/m.test(sample)) return { format: 'N-Quads', label: 'RDF Messages line format' };
-      if (/^@(?:prefix|base|version|message)\b/im.test(sample)) return { format: undefined, label: 'Turtle/TriG' };
-      if (/^[^#\n]*<[^>]+>\s+<[^>]+>\s+/.test(sample)) return { format: undefined, label: 'line RDF' };
-      return { format: undefined, label: 'auto' };
+      const contentVersion = extractContentTypeVersion(lowerType);
+      const sampleVersion = extractVersionDirective(sample);
+      const version = sampleVersion || contentVersion;
+      const rdfMessages = isMessagesVersion(version) || /(?:^|;)\s*messages(?:\s*(?:;|$)|=true\b)/.test(lowerType);
+      const withMessages = result => ({
+        ...result,
+        ...(version ? { version } : {}),
+        ...(rdfMessages ? { rdfMessages: true } : {}),
+      });
+
+      const contentTypeFormat = detectContentTypeFormat(lowerType, rdfMessages);
+      if (contentTypeFormat) return withMessages(contentTypeFormat);
+
+      const fallbackFormat = detectFallbackFormat(lowerUrl, sample, rdfMessages);
+      if (fallbackFormat) return withMessages(fallbackFormat);
+
+      return withMessages({ format: undefined, label: rdfMessages ? 'RDF Messages' : 'auto' });
     }
 
-    function createParserOptions(format, baseIRI) {
+    function detectContentTypeFormat(contentType, rdfMessages) {
+      if (contentType.includes('n-quads')) return { format: 'N-Quads', label: rdfMessages ? 'N-Quads RDF Messages' : 'N-Quads' };
+      if (contentType.includes('n-triples')) return { format: 'N-Triples', label: rdfMessages ? 'N-Triples RDF Messages' : 'N-Triples' };
+      if (contentType.includes('trig')) return { format: 'TriG', label: rdfMessages ? 'TriG RDF Messages' : 'TriG' };
+      if (contentType.includes('turtle') || contentType.includes('text/n3')) return { format: undefined, label: rdfMessages ? 'Turtle/TriG RDF Messages' : 'Turtle/TriG' };
+      return undefined;
+    }
+
+    function detectFallbackFormat(lowerUrl, sample, rdfMessages) {
+      if (lowerUrl.endsWith('.nq')) return { format: 'N-Quads', label: rdfMessages ? 'N-Quads RDF Messages' : 'N-Quads' };
+      if (lowerUrl.endsWith('.nt')) return { format: 'N-Triples', label: rdfMessages ? 'N-Triples RDF Messages' : 'N-Triples' };
+      if (lowerUrl.endsWith('.trig')) return { format: 'TriG', label: rdfMessages ? 'TriG RDF Messages' : 'TriG' };
+      if (lowerUrl.endsWith('.ttl') || lowerUrl.endsWith('.n3')) return { format: undefined, label: rdfMessages ? 'Turtle/TriG RDF Messages' : 'Turtle/TriG' };
+      if (/^(?:VERSION|MESSAGE)\b/m.test(sample)) return { format: 'N-Quads', label: 'RDF Messages line format', rdfMessages: true };
+      if (/^@(?:prefix|base|version|message)\b/im.test(sample)) return { format: undefined, label: rdfMessages ? 'Turtle/TriG RDF Messages' : 'Turtle/TriG' };
+      if (/^[^#\n]*<[^>]+>\s+<[^>]+>\s+/.test(sample)) return { format: undefined, label: rdfMessages ? 'line RDF Messages' : 'line RDF' };
+      return undefined;
+    }
+
+    function extractContentTypeVersion(contentType) {
+      const match = /(?:^|;)\s*version\s*=\s*(?:"([^"]+)"|([^;\s]+))/i.exec(contentType);
+      return match?.[1] || match?.[2] || '';
+    }
+
+    function extractVersionDirective(sample) {
+      const match = /^(?:@version|VERSION)\s+"([^"]+)"/im.exec(sample);
+      return match?.[1] || '';
+    }
+
+    function isMessagesVersion(version) {
+      return typeof version === 'string' && version.toLowerCase().endsWith('-messages');
+    }
+
+    function createParserOptions(detected, baseIRI) {
       const options = {};
-      if (format) options.format = format;
+      if (detected.format) options.format = detected.format;
       if (baseIRI) options.baseIRI = baseIRI;
+      if (detected.version) options.version = detected.version;
+      if (detected.rdfMessages) options.rdfMessages = true;
       if (relaxInput.checked) options.relax = true;
+      return options;
+    }
+
+    function createWriterOptions(detected, format) {
+      const options = { format };
+      if (detected.version && detected.rdfMessages) options.version = detected.version;
       return options;
     }
 
@@ -440,8 +491,8 @@ ex:m2 ex:p ex:o2 .</textarea>
       updateMetrics(start, items);
     }
 
-    async function serialize(items, format) {
-      const writer = new Writer({ format });
+    async function serialize(items, writerOptions) {
+      const writer = new Writer(writerOptions);
       writer.addQuads(items);
       return new Promise((resolve, reject) => {
         writer.end((error, result) => error ? reject(error) : resolve(result || ''));
