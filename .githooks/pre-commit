@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+set -eu
+
+echo "Building distribution files before commit..."
+npm run build
+
+echo "Adding generated dist files to the commit..."
+git add -f dist
