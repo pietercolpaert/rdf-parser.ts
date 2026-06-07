@@ -1,7 +1,7 @@
 {
   "name": "rdf-parser-ts",
-  "version": "0.2.1",
-  "description": "Fast RDF-JS parser and writer for Turtle, N-Triples, N-Quads, and TriG on Node.js 24+.",
+  "version": "0.2.2",
+  "description": "Fast RDF-JS parser and writer for Turtle, N-Triples, N-Quads, and TriG for the browser and NodeJS.",
   "keywords": [
     "rdf",
     "rdf-js",
@@ -66,7 +66,7 @@
     "ci": "npm run check && npm run perf:regression",
     "hooks:install": "node scripts/install-hooks.cjs",
     "prepare": "npm run build && npm run hooks:install",
-    "spec": "npm run build && npm run spec-1-1 && npm run spec-1-2",
+    "spec": "npm run build && npm run spec-clean && npm run spec-1-1 && npm run spec-1-2",
     "spec-1-1": "npm run spec-1-1-turtle && npm run spec-1-1-ntriples && npm run spec-1-1-nquads && npm run spec-1-1-trig",
     "spec-1-1-earl": "npm run spec-1-1-earl-turtle && npm run spec-1-1-earl-ntriples && npm run spec-1-1-earl-nquads && npm run spec-1-1-earl-trig",
     "spec-1-1-ntriples": "rdf-test-suite spec/parser.cjs https://w3c.github.io/rdf-tests/rdf/rdf11/rdf-n-triples/manifest.ttl -i '{ \"format\": \"n-triples\" }' -c .rdf-test-suite-cache/",

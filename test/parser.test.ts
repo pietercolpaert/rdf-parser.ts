@@ -64,6 +64,7 @@ describe('Parser', () => {
     expect(ids('@prefix ex: <http://example.com/>. { ex:s ex:p ex:o }')).toEqual([
       '<http://example.com/s> <http://example.com/p> <http://example.com/o> .',
     ]);
+    expect(() => new Parser({ format: 'turtle' }).parse('{ <s> <p> <o> }')).toThrow(/Expected \./);
   });
 
   it('supports an RDF-JS factory override', () => {

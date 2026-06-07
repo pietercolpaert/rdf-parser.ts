@@ -22,6 +22,14 @@ function sameTerm(a, b) {
   }
   return true;
 }
+function scanCommentEnd(input, index) {
+  for (let i = index + 1; i < input.length; i++) {
+    const code = input.charCodeAt(i);
+    if (code === 10) return i + 1;
+    if (code === 13) return input.charCodeAt(i + 1) === 10 ? i + 2 : i + 1;
+  }
+  return -1;
+}
 function resolveIri(value, baseIRI) {
   if (!baseIRI || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)) return value;
   try {
@@ -312,6 +320,7 @@ var init_index = __esm({
       strictNTriples;
       strictNQuads;
       allowLegacyTripleTerms;
+      allowDotlessGraphTerminator;
       relax;
       defaultGraphTerm;
       namedNodeCache;
@@ -346,6 +355,7 @@ var init_index = __esm({
         this.strictNTriples = format.includes("n-triples");
         this.strictNQuads = format.includes("n-quads");
         this.allowLegacyTripleTerms = format.includes("*");
+        this.allowDotlessGraphTerminator = format === "" || format.includes("trig");
       }
       parse(final = true) {
         while (true) {
@@ -506,42 +516,50 @@ var init_index = __esm({
         if (this.namedNodeCache.size < 4096) this.namedNodeCache.set(value, node);
         return node;
       }
-      parseStatement(defaultGraph2, allowGraphCloseTerminator = false) {
+      parseStatement(defaultGraph2, allowGraphCloseTerminator = false, insideGraphBlock = false) {
         this.skipWsAndComments();
-        if (this.parseDirective(defaultGraph2)) return;
+        if (this.parseDirective(defaultGraph2)) return false;
         if (this.peekCharCode() === 123) {
+          if (insideGraphBlock) this.fail("Graph blocks are not allowed inside graph blocks");
           this.index++;
           this.parseGraphStatements(defaultGraph2);
-          return;
+          return false;
         }
         if (this.matchWord("GRAPH")) {
+          if (insideGraphBlock) this.fail("Graph blocks are not allowed inside graph blocks");
           this.skipWsAndComments();
-          const graph = this.parseNamedOrBlankTerm(defaultGraph2);
+          const graph = this.parseGraphLabel(defaultGraph2);
           this.skipWsAndComments();
           this.expectChar(123, "Expected { after GRAPH label");
           this.parseGraphStatements(graph);
-          return;
+          return false;
         }
+        const termStart = this.index;
         const subjectOrGraph = this.parseSubject(defaultGraph2);
+        const termEnd = this.index;
         this.skipWsAndComments();
         if (this.peekCharCode() === 123) {
+          if (insideGraphBlock) this.fail("Graph blocks are not allowed inside graph blocks");
+          this.assertGraphLabel(subjectOrGraph, termStart, termEnd);
           this.index++;
           this.parseGraphStatements(subjectOrGraph);
-          return;
+          return false;
         }
-        this.parsePredicateObjectList(subjectOrGraph, defaultGraph2, 46, allowGraphCloseTerminator);
+        return this.parsePredicateObjectList(subjectOrGraph, defaultGraph2, 46, allowGraphCloseTerminator);
       }
       parseGraphStatements(graph) {
+        let lastStatementClosedByGraph = false;
         while (true) {
           this.skipWsAndComments();
           if (this.index >= this.length) this.fail("Unclosed graph block");
           if (this.peekCharCode() === 125) {
             this.index++;
             this.skipWsAndComments();
+            if (lastStatementClosedByGraph && this.peekCharCode() === 46) this.fail("Expected . after triple");
             if (this.peekCharCode() === 46) this.index++;
             return;
           }
-          this.parseStatement(graph, true);
+          lastStatementClosedByGraph = this.parseStatement(graph, this.allowDotlessGraphTerminator, true);
         }
       }
       parsePredicateObjectList(subject, graph, terminatorCode = 46, allowGraphCloseTerminator = false) {
@@ -557,7 +575,7 @@ var init_index = __esm({
               this.addQuad(subject, predicate, object, explicitGraph);
               this.skipWsAndComments();
               this.expectChar(46, "Expected . after quad");
-              return;
+              return false;
             }
             this.addQuad(subject, predicate, object, graph);
             if (this.peekCharCode() !== 44) break;
@@ -571,9 +589,10 @@ var init_index = __esm({
           this.skipWsAndComments();
           if (this.peekCharCode() === terminatorCode || allowGraphCloseTerminator && this.peekCharCode() === 125) break;
         }
-        if (allowGraphCloseTerminator && this.peekCharCode() === 125) return;
+        if (allowGraphCloseTerminator && this.peekCharCode() === 125) return true;
         if (terminatorCode === 46) this.expectChar(46, "Expected . after triple");
         else if (this.peekCharCode() !== terminatorCode) this.fail(`Expected ${String.fromCharCode(terminatorCode)} after property list`);
+        return false;
       }
       addQuad(subject, predicate, object, graph) {
         const quad2 = this.factory.quad(subject, predicate, object, graph);
@@ -679,6 +698,38 @@ var init_index = __esm({
         const term = this.parseTerm(graph);
         if (term.termType !== "NamedNode" && term.termType !== "BlankNode") this.fail(`Invalid graph term ${term.termType}`);
         return term;
+      }
+      parseGraphLabel(graph) {
+        const start = this.index;
+        const term = this.parseNamedOrBlankTerm(graph);
+        this.assertGraphLabel(term, start);
+        return term;
+      }
+      assertGraphLabel(term, start, end = this.index) {
+        if (term.termType !== "NamedNode" && term.termType !== "BlankNode") this.fail(`Invalid graph term ${term.termType}`);
+        const code = this.input.charCodeAt(start);
+        if (code === 91 && !this.isAnonymousBlankNodeLabel(start, end) || code === 40 || code === 60 && this.input.charCodeAt(start + 1) === 60) {
+          this.fail(`Invalid graph term ${term.termType}`);
+        }
+      }
+      isAnonymousBlankNodeLabel(start, end) {
+        if (this.input.charCodeAt(start) !== 91 || this.input.charCodeAt(end - 1) !== 93) return false;
+        let i = start + 1;
+        while (i < end - 1) {
+          const code = this.input.charCodeAt(i);
+          if (isWs(code)) {
+            i++;
+            continue;
+          }
+          if (code === 35) {
+            const commentEnd = scanCommentEnd(this.input, i);
+            if (commentEnd < 0 || commentEnd > end - 1) return false;
+            i = commentEnd;
+            continue;
+          }
+          return false;
+        }
+        return true;
       }
       parseTerm(graph) {
         this.skipWsAndComments();

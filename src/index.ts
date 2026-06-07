@@ -1016,6 +1016,7 @@ class CoreParser {
   private readonly strictNTriples: boolean;
   private readonly strictNQuads: boolean;
   private readonly allowLegacyTripleTerms: boolean;
+  private readonly allowDotlessGraphTerminator: boolean;
   private readonly relax: boolean;
   private readonly defaultGraphTerm: DefaultGraphLike;
   private readonly namedNodeCache: Map<string, NamedNodeLike>;
@@ -1051,6 +1052,7 @@ class CoreParser {
     this.strictNTriples = format.includes('n-triples');
     this.strictNQuads = format.includes('n-quads');
     this.allowLegacyTripleTerms = format.includes('*');
+    this.allowDotlessGraphTerminator = format === '' || format.includes('trig');
   }
 
   public parse(final = true): { quads: QuadLike[]; messageQuads: MessageQuadArray; prefixes: Record<string, NamedNodeLike>; messagesEnabled: boolean } {
@@ -1229,48 +1231,56 @@ class CoreParser {
     return node;
   }
 
-  private parseStatement(defaultGraph: TermLike, allowGraphCloseTerminator = false): void {
+  private parseStatement(defaultGraph: TermLike, allowGraphCloseTerminator = false, insideGraphBlock = false): boolean {
     this.skipWsAndComments();
-    if (this.parseDirective(defaultGraph)) return;
+    if (this.parseDirective(defaultGraph)) return false;
     if (this.peekCharCode() === 123) {
+      if (insideGraphBlock) this.fail('Graph blocks are not allowed inside graph blocks');
       this.index++;
       this.parseGraphStatements(defaultGraph);
-      return;
+      return false;
     }
     if (this.matchWord('GRAPH')) {
+      if (insideGraphBlock) this.fail('Graph blocks are not allowed inside graph blocks');
       this.skipWsAndComments();
-      const graph = this.parseNamedOrBlankTerm(defaultGraph);
+      const graph = this.parseGraphLabel(defaultGraph);
       this.skipWsAndComments();
       this.expectChar(123, 'Expected { after GRAPH label');
       this.parseGraphStatements(graph);
-      return;
+      return false;
     }
 
+    const termStart = this.index;
     const subjectOrGraph = this.parseSubject(defaultGraph);
+    const termEnd = this.index;
     this.skipWsAndComments();
     if (this.peekCharCode() === 123) {
+      if (insideGraphBlock) this.fail('Graph blocks are not allowed inside graph blocks');
+      this.assertGraphLabel(subjectOrGraph, termStart, termEnd);
       this.index++;
       this.parseGraphStatements(subjectOrGraph);
-      return;
+      return false;
     }
-    this.parsePredicateObjectList(subjectOrGraph, defaultGraph, 46, allowGraphCloseTerminator);
+    return this.parsePredicateObjectList(subjectOrGraph, defaultGraph, 46, allowGraphCloseTerminator);
   }
 
   private parseGraphStatements(graph: TermLike): void {
+    let lastStatementClosedByGraph = false;
     while (true) {
       this.skipWsAndComments();
       if (this.index >= this.length) this.fail('Unclosed graph block');
       if (this.peekCharCode() === 125) {
         this.index++;
         this.skipWsAndComments();
+        if (lastStatementClosedByGraph && this.peekCharCode() === 46) this.fail('Expected . after triple');
         if (this.peekCharCode() === 46) this.index++;
         return;
       }
-      this.parseStatement(graph, true);
+      lastStatementClosedByGraph = this.parseStatement(graph, this.allowDotlessGraphTerminator, true);
     }
   }
 
-  private parsePredicateObjectList(subject: TermLike, graph: TermLike, terminatorCode = 46, allowGraphCloseTerminator = false): void {
+  private parsePredicateObjectList(subject: TermLike, graph: TermLike, terminatorCode = 46, allowGraphCloseTerminator = false): boolean {
     while (true) {
       const predicate = this.parsePredicate(graph);
       this.skipWsAndComments();
@@ -1284,7 +1294,7 @@ class CoreParser {
           this.addQuad(subject, predicate, object, explicitGraph);
           this.skipWsAndComments();
           this.expectChar(46, 'Expected . after quad');
-          return;
+          return false;
         }
 
         this.addQuad(subject, predicate, object, graph);
@@ -1300,9 +1310,10 @@ class CoreParser {
       this.skipWsAndComments();
       if (this.peekCharCode() === terminatorCode || (allowGraphCloseTerminator && this.peekCharCode() === 125)) break;
     }
-    if (allowGraphCloseTerminator && this.peekCharCode() === 125) return;
+    if (allowGraphCloseTerminator && this.peekCharCode() === 125) return true;
     if (terminatorCode === 46) this.expectChar(46, 'Expected . after triple');
     else if (this.peekCharCode() !== terminatorCode) this.fail(`Expected ${String.fromCharCode(terminatorCode)} after property list`);
+    return false;
   }
 
   private addQuad(subject: TermLike, predicate: TermLike, object: TermLike, graph: TermLike): void {
@@ -1419,6 +1430,41 @@ class CoreParser {
     const term = this.parseTerm(graph);
     if (term.termType !== 'NamedNode' && term.termType !== 'BlankNode') this.fail(`Invalid graph term ${term.termType}`);
     return term;
+  }
+
+  private parseGraphLabel(graph: TermLike): TermLike {
+    const start = this.index;
+    const term = this.parseNamedOrBlankTerm(graph);
+    this.assertGraphLabel(term, start);
+    return term;
+  }
+
+  private assertGraphLabel(term: TermLike, start: number, end = this.index): void {
+    if (term.termType !== 'NamedNode' && term.termType !== 'BlankNode') this.fail(`Invalid graph term ${term.termType}`);
+    const code = this.input.charCodeAt(start);
+    if ((code === 91 && !this.isAnonymousBlankNodeLabel(start, end)) || code === 40 || (code === 60 && this.input.charCodeAt(start + 1) === 60)) {
+      this.fail(`Invalid graph term ${term.termType}`);
+    }
+  }
+
+  private isAnonymousBlankNodeLabel(start: number, end: number): boolean {
+    if (this.input.charCodeAt(start) !== 91 || this.input.charCodeAt(end - 1) !== 93) return false;
+    let i = start + 1;
+    while (i < end - 1) {
+      const code = this.input.charCodeAt(i);
+      if (isWs(code)) {
+        i++;
+        continue;
+      }
+      if (code === 35) {
+        const commentEnd = scanCommentEnd(this.input, i);
+        if (commentEnd < 0 || commentEnd > end - 1) return false;
+        i = commentEnd;
+        continue;
+      }
+      return false;
+    }
+    return true;
   }
 
   private parseTerm(graph: TermLike): TermLike {
