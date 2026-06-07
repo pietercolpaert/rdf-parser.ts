@@ -74,17 +74,24 @@ The package exports CommonJS, ESM, and browser builds:
 }
 ```
 
-The browser bundle is minified and supports string parsing with `Parser` plus Web Streams parsing with `StreamParser`. The Node.js build keeps the Node `Transform`-based `StreamParser`; the browser build exposes a Web Streams-compatible `StreamParser` with `readable` and `writable` properties.
+The browser bundle is minified and supports string parsing with `Parser`, RDF serialization with `Writer`, and Web Streams parsing with `StreamParser`. The Node.js build keeps the Node `Transform`-based `StreamParser`; the browser build exposes a Web Streams-compatible `StreamParser` with `readable` and `writable` properties.
 
 ## Browser usage and bundle size
 
 With a browser-aware bundler, import the browser entry explicitly:
 
 ```ts
-import { Parser, quadToString } from 'rdf-parser-ts/browser';
+import { Parser, Writer, quadToString } from 'rdf-parser-ts/browser';
 
 const quads = new Parser({ baseIRI: 'https://example.org/' }).parse('<s> <p> <o>.') ?? [];
 console.log(quadToString(quads[0]!));
+
+const writer = new Writer({ prefixes: { ex: 'https://example.org/' } });
+writer.addQuad(quads[0]!);
+writer.end((error, output) => {
+  if (error) throw error;
+  console.log(output);
+});
 ```
 
 For direct browser usage through a CDN, use the minified ESM bundle:
@@ -130,8 +137,8 @@ Current browser bundle sizes after `npm run build`:
 
 | Bundle | Raw | gzip |
 | --- | ---: | ---: |
-| `dist/browser/index.mjs` | 27,665 bytes (27.0 KiB) | 7,596 bytes (7.4 KiB) |
-| `dist/browser/index.global.js` | 28,147 bytes (27.5 KiB) | 7,792 bytes (7.6 KiB) |
+| `dist/browser/index.mjs` | 34,460 bytes (33.7 KiB) | 9,532 bytes (9.3 KiB) |
+| `dist/browser/index.global.js` | 34,943 bytes (34.1 KiB) | 9,716 bytes (9.5 KiB) |
 
 ## Parsing strings
 
@@ -163,6 +170,44 @@ parser.parse('<s> <p> <o>.', (error, quad, prefixes) => {
   else console.log('done', prefixes);
 });
 ```
+
+## Writing RDF
+
+`Writer` serializes RDF-JS quads to Turtle/TriG-style output by default and supports N-Triples or N-Quads line formats through the `format` option. Its API follows N3.js-style usage: add quads with `addQuad()` or `addQuads()`, add prefixes with `addPrefix()` or `addPrefixes()`, and collect the final string with `end()` when no output stream is supplied.
+
+```ts
+import { DataFactory, Writer } from 'rdf-parser-ts';
+
+const { namedNode, literal, quad } = DataFactory;
+
+const writer = new Writer({ prefixes: { ex: 'https://example.org/' } });
+writer.addQuad(quad(
+  namedNode('https://example.org/s'),
+  namedNode('https://example.org/p'),
+  literal('hello'),
+));
+
+writer.end((error, output) => {
+  if (error) throw error;
+  console.log(output);
+  // @prefix ex: <https://example.org/>.
+  //
+  // ex:s ex:p "hello".
+});
+```
+
+For line-based output, choose `N-Triples` or `N-Quads`:
+
+```ts
+const writer = new Writer({ format: 'N-Quads' });
+writer.addQuad(quad(namedNode('s'), namedNode('p'), literal('o'), namedNode('g')));
+writer.end((error, output) => {
+  if (error) throw error;
+  console.log(output); // <s> <p> "o" <g> .
+});
+```
+
+`Writer` also supports blank-node property-list helpers through `blank()`, RDF list helpers through `list()`, RDF-star quoted triples/quads, base IRI shortening, datatype/language literal serialization, and output streams. On Node.js, `StreamWriter` is a `Transform` stream in object mode for serializing quad streams to text.
 
 ## RDF Messages
 
@@ -284,6 +329,8 @@ Exports include:
 - `DefaultGraph`
 - `Quad`
 - `Message`
+- `Writer`
+- `StreamWriter`
 - `namedNode`
 - `blankNode`
 - `literal`
@@ -380,6 +427,15 @@ node perf/bench.js --sizes 10000,50000 --no-triple-terms
 ```
 
 Graphy 4.x's N-Quads reader does not parse RDF1.2 triple terms, so the default triple-term benchmark prints a skipped Graphy row. Use `--no-triple-terms` or `npm run perf:graphy` for direct `rdf-parser-ts`, N3.js, Graphy, and Graphy relaxed-mode numbers on the same generated line-format input.
+
+### Quick regression check
+
+The latest `npm run perf:regression` run was captured with Node.js v25.9.0 on Linux x64 after `npm run build`. It compares the current build with the git `HEAD` baseline on 100,000 generated N-Quads, taking the best of 3 samples. The CI warning threshold is a 20% throughput drop.
+
+| Scenario | Baseline | Current | Change |
+| --- | ---: | ---: | ---: |
+| `Parser.parse` | 1,428,785 q/s | 1,545,708 q/s | +8.2% |
+| `StreamParser 64KiB` | 957,624 q/s | 990,398 q/s | +3.4% |
 
 ### Quick benchmark snapshot
 

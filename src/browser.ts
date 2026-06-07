@@ -9,6 +9,7 @@ export {
   Parser,
   Quad,
   Variable,
+  Writer,
   blankNode,
   defaultGraph,
   isMessageQuad,
@@ -43,6 +44,7 @@ export type {
   TermLike,
   TermType,
   VariableLike,
+  WriterOptions,
 } from './index';
 
 import type { MessageQuad, NamedNodeLike, ParserOptions, ParserOutputItem, QuadLike } from './index';

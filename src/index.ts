@@ -24,6 +24,21 @@ export interface ParserOptions {
 
 export interface StreamParserOptions extends ParserOptions, TransformOptions {}
 
+export interface WriterOptions {
+  format?: string;
+  prefixes?: Record<string, string | NamedNodeLike>;
+  baseIRI?: string;
+  end?: boolean;
+  lists?: Record<string, TermLike[]>;
+}
+
+export interface WriterOutputStream {
+  write(chunk: string, encoding?: BufferEncoding, callback?: (error?: Error | null) => void): unknown;
+  end(callback?: (error?: Error | null, result?: string) => void): unknown;
+}
+
+export type WriterEndCallback = (error?: Error | null, output?: string) => void;
+
 export interface DataFactoryLike {
   namedNode(value: string): NamedNodeLike;
   blankNode(value?: string): BlankNodeLike;
@@ -200,6 +215,432 @@ export const DataFactory: DataFactoryLike = {
   defaultGraph: () => defaultGraphSingleton,
   quad: (subject, predicate, object, graph = defaultGraphSingleton) => new Quad(subject, predicate, object, graph),
 };
+
+type WriterTerm = TermLike | SerializedTerm;
+type WriterQuadLike = Omit<QuadLike, 'subject' | 'predicate' | 'object' | 'graph'> & {
+  subject: WriterTerm;
+  predicate: WriterTerm;
+  object: WriterTerm;
+  graph: WriterTerm;
+};
+type WriterBlankChild = { predicate: WriterTerm; object: WriterTerm };
+
+class SerializedTerm implements Term {
+  public readonly termType = 'BlankNode' as const;
+  public constructor(public readonly value: string) {}
+  public equals(other: unknown): boolean { return other === this; }
+}
+
+export class Writer {
+  private readonly outputStream: WriterOutputStream;
+  private readonly endStream: boolean;
+  private readonly lineMode: boolean;
+  private readonly lists?: Record<string, TermLike[]>;
+  private graph: WriterTerm = defaultGraphSingleton;
+  private subject: WriterTerm | null = null;
+  private predicate: WriterTerm | null = null;
+  private prefixByIri: Record<string, string> | undefined;
+  private baseIRI?: string;
+  private closed = false;
+
+  public constructor(options?: WriterOptions);
+  public constructor(outputStream: WriterOutputStream, options?: WriterOptions);
+  public constructor(outputStreamOrOptions?: WriterOutputStream | WriterOptions, maybeOptions?: WriterOptions) {
+    let outputStream: WriterOutputStream | undefined;
+    let options: WriterOptions;
+    if (isWriterOutputStream(outputStreamOrOptions)) {
+      outputStream = outputStreamOrOptions;
+      options = maybeOptions ?? {};
+    } else {
+      options = outputStreamOrOptions ?? {};
+    }
+
+    if (outputStream) {
+      this.outputStream = outputStream;
+      this.endStream = options.end !== undefined ? Boolean(options.end) : true;
+    } else {
+      let output = '';
+      this.outputStream = {
+        write: (chunk, _encoding, callback) => {
+          output += chunk;
+          callback?.(null);
+        },
+        end: callback => callback?.(null, output),
+      };
+      this.endStream = true;
+    }
+
+    this.lineMode = /(?:n-)?(?:triple|quad)s?/i.test(options.format ?? '');
+    this.lists = options.lists;
+    if (!this.lineMode) {
+      this.prefixByIri = Object.create(null) as Record<string, string>;
+      if (options.baseIRI) this.baseIRI = options.baseIRI;
+      if (options.prefixes) this.addPrefixes(options.prefixes);
+    }
+  }
+
+  public quadToString(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, graph: WriterTerm = defaultGraphSingleton): string {
+    const graphPart = graph.termType === 'DefaultGraph' || !graph.value ? '' : ` ${this.encodeIriOrBlank(graph)}`;
+    return `${this.encodeSubject(subject)} ${this.encodeIriOrBlank(predicate)} ${this.encodeObject(object)}${graphPart} .\n`;
+  }
+
+  public quadsToString(quads: Iterable<QuadLike>): string {
+    let output = '';
+    for (const quad of quads) output += this.quadToString(quad.subject, quad.predicate, quad.object, quad.graph);
+    return output;
+  }
+
+  public addQuad(quad: QuadLike, done?: (error?: Error | null) => void): void;
+  public addQuad(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, done?: (error?: Error | null) => void): void;
+  public addQuad(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, graph: WriterTerm, done?: (error?: Error | null) => void): void;
+  public addQuad(
+    subjectOrQuad: WriterTerm | QuadLike,
+    predicateOrDone?: WriterTerm | ((error?: Error | null) => void),
+    object?: WriterTerm,
+    graphOrDone?: WriterTerm | ((error?: Error | null) => void),
+    done?: (error?: Error | null) => void,
+  ): void {
+    try {
+      this.assertOpen();
+      let subject: WriterTerm;
+      let predicate: WriterTerm;
+      let quadObject: WriterTerm;
+      let graph: WriterTerm;
+      let callback = done;
+
+      if (object === undefined && isQuadLike(subjectOrQuad)) {
+        subject = subjectOrQuad.subject;
+        predicate = subjectOrQuad.predicate;
+        quadObject = subjectOrQuad.object;
+        graph = subjectOrQuad.graph;
+        callback = typeof predicateOrDone === 'function' ? predicateOrDone : done;
+      } else {
+        if (!predicateOrDone || typeof predicateOrDone === 'function' || !object) throw new Error('Expected subject, predicate, and object');
+        subject = subjectOrQuad as WriterTerm;
+        predicate = predicateOrDone;
+        quadObject = object;
+        if (typeof graphOrDone === 'function') {
+          graph = defaultGraphSingleton;
+          callback = graphOrDone;
+        } else {
+          graph = graphOrDone ?? defaultGraphSingleton;
+        }
+      }
+
+      if (this.lineMode) this.write(this.quadToString(subject, predicate, quadObject, graph), callback);
+      else this.writePrettyQuad(subject, predicate, quadObject, graph, callback);
+    } catch (error) {
+      const callback = typeof predicateOrDone === 'function' ? predicateOrDone :
+        typeof graphOrDone === 'function' ? graphOrDone : done;
+      callback?.(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  public addQuads(quads: Iterable<QuadLike>): void {
+    for (const quad of quads) this.addQuad(quad);
+  }
+
+  public addPrefix(prefix: string, iri: string | NamedNodeLike, done?: (error?: Error | null) => void): void {
+    this.addPrefixes({ [prefix]: iri }, done);
+  }
+
+  public addPrefixes(prefixes: Record<string, string | NamedNodeLike>, done?: (error?: Error | null) => void): void {
+    if (!this.prefixByIri) {
+      done?.(null);
+      return;
+    }
+
+    try {
+      let wrote = false;
+      for (const [prefix, iriValue] of Object.entries(prefixes)) {
+        const iri = typeof iriValue === 'string' ? iriValue : iriValue.value;
+        if (this.subject !== null) this.closeCurrentStatement();
+        this.prefixByIri[iri] = `${prefix}:`;
+        this.write(`@prefix ${prefix}: <${this.escapeIri(iri)}>.\n`, undefined);
+        wrote = true;
+      }
+      if (wrote) this.write('\n', done);
+      else done?.(null);
+    } catch (error) {
+      done?.(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  public blank(): TermLike;
+  public blank(children: WriterBlankChild[]): TermLike;
+  public blank(child: WriterBlankChild): TermLike;
+  public blank(predicate: WriterTerm, object: WriterTerm): TermLike;
+  public blank(predicateOrChildren?: WriterTerm | WriterBlankChild | WriterBlankChild[], object?: WriterTerm): TermLike {
+    let children: WriterBlankChild[];
+    if (predicateOrChildren === undefined) children = [];
+    else if (Array.isArray(predicateOrChildren)) children = predicateOrChildren;
+    else if (isTermLike(predicateOrChildren)) children = [{ predicate: predicateOrChildren, object: object ?? defaultGraphSingleton }];
+    else children = [predicateOrChildren];
+
+    if (children.length === 0) return new SerializedTerm('[]') as unknown as TermLike;
+    if (children.length === 1) {
+      const child = children[0]!;
+      if (!(child.object instanceof SerializedTerm)) {
+        return new SerializedTerm(`[ ${this.encodePredicate(child.predicate)} ${this.encodeObject(child.object)} ]`) as unknown as TermLike;
+      }
+    }
+
+    let output = '[';
+    let lastPredicate: WriterTerm | null = null;
+    for (const [index, child] of children.entries()) {
+      if (lastPredicate && child.predicate.equals(lastPredicate)) {
+        output += `, ${this.encodeObject(child.object)}`;
+      } else {
+        output += `${index === 0 ? '\n  ' : ';\n  '}${this.encodePredicate(child.predicate)} ${this.encodeObject(child.object)}`;
+        lastPredicate = child.predicate;
+      }
+    }
+    output += '\n]';
+    return new SerializedTerm(output) as unknown as TermLike;
+  }
+
+  public list(elements: WriterTerm[] = []): TermLike {
+    return new SerializedTerm(`(${elements.map(element => this.encodeObject(element)).join(' ')})`) as unknown as TermLike;
+  }
+
+  public end(done?: WriterEndCallback): void {
+    try {
+      if (!this.closed && this.subject !== null) this.closeCurrentStatement();
+      this.closed = true;
+      if (!this.endStream) {
+        done?.(null);
+        return;
+      }
+      let called = false;
+      const callback = (error?: Error | null, output?: string) => {
+        if (called) return;
+        called = true;
+        done?.(error, output);
+      };
+      try {
+        this.outputStream.end(callback);
+      } catch (error) {
+        callback(error instanceof Error ? error : new Error(String(error)));
+      }
+    } catch (error) {
+      done?.(error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private writePrettyQuad(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, graph: WriterTerm, done?: (error?: Error | null) => void): void {
+    if (!graph.equals(this.graph)) {
+      if (this.subject !== null) this.write(this.graph.termType === 'DefaultGraph' ? '.\n' : '\n}\n');
+      if (graph.termType !== 'DefaultGraph') this.write(`${this.encodeIriOrBlank(graph)} {\n`);
+      this.graph = graph;
+      this.subject = null;
+      this.predicate = null;
+    }
+
+    if (this.subject && subject.equals(this.subject)) {
+      if (this.predicate && predicate.equals(this.predicate)) {
+        this.write(`, ${this.encodeObject(object)}`, done);
+      } else {
+        this.predicate = predicate;
+        this.write(`;\n    ${this.encodePredicate(predicate)} ${this.encodeObject(object)}`, done);
+      }
+      return;
+    }
+
+    const separator = this.subject === null ? '' : '.\n';
+    this.subject = subject;
+    this.predicate = predicate;
+    this.write(`${separator}${this.encodeSubject(subject)} ${this.encodePredicate(predicate)} ${this.encodeObject(object)}`, done);
+  }
+
+  private closeCurrentStatement(): void {
+    this.write(this.graph.termType === 'DefaultGraph' ? '.\n' : '\n}\n');
+    this.subject = null;
+    this.predicate = null;
+    this.graph = defaultGraphSingleton;
+  }
+
+  private encodeSubject(term: WriterTerm): string {
+    return term.termType === 'Quad' ? this.encodeQuad(term) : this.encodeIriOrBlank(term);
+  }
+
+  private encodePredicate(term: WriterTerm): string {
+    return term.termType === 'NamedNode' && term.value === RDF_TYPE ? 'a' : this.encodeIriOrBlank(term);
+  }
+
+  private encodeObject(term: WriterTerm): string {
+    if (term instanceof SerializedTerm) return term.value;
+    if (term.termType === 'Quad') return this.encodeQuad(term);
+    if (term.termType === 'Literal') return this.encodeLiteral(term);
+    return this.encodeIriOrBlank(term);
+  }
+
+  private encodeIriOrBlank(term: WriterTerm): string {
+    if (term instanceof SerializedTerm) return term.value;
+    if (term.termType === 'BlankNode') {
+      if (this.lists && term.value in this.lists) return this.list(this.lists[term.value]!).value;
+      return `_:${term.value}`;
+    }
+    if (term.termType !== 'NamedNode') return `_:${term.value}`;
+
+    let iri = this.baseIRI ? relativizeIri(term.value, this.baseIRI) : term.value;
+    iri = this.escapeIri(iri);
+    const prefixed = this.prefixByIri ? this.toPrefixedName(iri) : undefined;
+    return prefixed ?? `<${iri}>`;
+  }
+
+  private encodeLiteral(literalTerm: LiteralLike): string {
+    const value = escapeLiteral(literalTerm.value);
+    if (literalTerm.language) {
+      const direction = literalTerm.direction ? `--${literalTerm.direction}` : '';
+      return `"${value}"@${literalTerm.language}${direction}`;
+    }
+
+    if (this.lineMode) {
+      if (literalTerm.datatype.value === XSD_STRING) return `"${value}"`;
+    } else {
+      switch (literalTerm.datatype.value) {
+        case XSD_STRING:
+          return `"${value}"`;
+        case XSD_BOOLEAN:
+          if (value === 'true' || value === 'false') return value;
+          break;
+        case XSD_INTEGER:
+          if (/^[+-]?\d+$/.test(value)) return value;
+          break;
+        case XSD_DECIMAL:
+          if (/^[+-]?(?:\d+\.\d*|\.\d+)$/.test(value)) return value;
+          break;
+        case XSD_DOUBLE:
+          if (/^[+-]?(?:(?:\d+\.\d*|\.\d+|\d+)[eE][+-]?\d+)$/.test(value)) return value;
+          break;
+      }
+    }
+
+    return `"${value}"^^${this.encodeIriOrBlank(literalTerm.datatype)}`;
+  }
+
+  private encodeQuad(quadTerm: QuadLike): string {
+    const graph = quadTerm.graph.termType === 'DefaultGraph' ? '' : ` ${this.encodeIriOrBlank(quadTerm.graph)}`;
+    return `<<(${this.encodeSubject(quadTerm.subject)} ${this.encodePredicate(quadTerm.predicate)} ${this.encodeObject(quadTerm.object)}${graph})>>`;
+  }
+
+  private toPrefixedName(iri: string): string | undefined {
+    if (!this.prefixByIri) return undefined;
+    let bestIri = '';
+    let bestPrefix = '';
+    for (const [prefixIri, prefix] of Object.entries(this.prefixByIri)) {
+      if (iri.startsWith(prefixIri) && prefixIri.length >= bestIri.length) {
+        const local = iri.slice(prefixIri.length);
+        if (isSafeLocalName(local)) {
+          bestIri = prefixIri;
+          bestPrefix = prefix;
+        }
+      }
+    }
+    return bestIri ? `${bestPrefix}${iri.slice(bestIri.length)}` : undefined;
+  }
+
+  private escapeIri(iri: string): string {
+    return escapeIri(iri);
+  }
+
+  private write(chunk: string, done?: (error?: Error | null) => void): void {
+    this.outputStream.write(chunk, 'utf8', done);
+  }
+
+  private assertOpen(): void {
+    if (this.closed) throw new Error('Cannot write because the writer has been closed.');
+  }
+}
+
+export class StreamWriter extends Transform {
+  private readonly writer: Writer;
+
+  public constructor(options: WriterOptions = {}) {
+    super({ encoding: 'utf8', writableObjectMode: true });
+    this.writer = new Writer({
+      write: (chunk, _encoding, callback) => {
+        this.push(chunk);
+        callback?.(null);
+      },
+      end: callback => {
+        this.push(null);
+        callback?.(null);
+      },
+    }, options);
+  }
+
+  public import(stream: Readable): this {
+    stream.on('data', quad => this.write(quad));
+    stream.on('end', () => this.end());
+    stream.on('error', error => this.emit('error', error));
+    stream.on('prefix', (prefix: string, iri: NamedNodeLike) => this.writer.addPrefix(prefix, iri));
+    return this;
+  }
+
+  public override _transform(quad: QuadLike, _encoding: BufferEncoding, callback: TransformCallback): void {
+    this.writer.addQuad(quad, callback);
+  }
+
+  public override _flush(callback: TransformCallback): void {
+    this.writer.end(callback);
+  }
+}
+
+function isQuadLike(value: unknown): value is QuadLike {
+  return Boolean(value && typeof value === 'object' && 'subject' in value && 'predicate' in value && 'object' in value && 'graph' in value);
+}
+
+function isWriterOutputStream(value: unknown): value is WriterOutputStream {
+  return Boolean(value && typeof value === 'object' && 'write' in value && typeof value.write === 'function' && 'end' in value && typeof value.end === 'function');
+}
+
+function isTermLike(value: unknown): value is WriterTerm {
+  return Boolean(value && typeof value === 'object' && 'termType' in value && 'value' in value && 'equals' in value);
+}
+
+function isSafeLocalName(value: string): boolean {
+  return /^[A-Za-z0-9_][A-Za-z0-9_-]*$/.test(value);
+}
+
+function escapeLiteral(value: string): string {
+  return value.replace(/["\\\t\n\r\b\f\u0000-\u001F]|[\uD800-\uDBFF][\uDC00-\uDFFF]/g, replaceEscapedCharacter);
+}
+
+function escapeIri(value: string): string {
+  return value.replace(/[>"\\\t\n\r\b\f\u0000-\u001F]|[\uD800-\uDBFF][\uDC00-\uDFFF]/g, replaceEscapedCharacter);
+}
+
+function replaceEscapedCharacter(character: string): string {
+  switch (character) {
+    case '\\': return '\\\\';
+    case '"': return '\\"';
+    case '\t': return '\\t';
+    case '\n': return '\\n';
+    case '\r': return '\\r';
+    case '\b': return '\\b';
+    case '\f': return '\\f';
+    default: {
+      const codePoint = character.codePointAt(0) ?? 0;
+      if (codePoint > 0xFFFF) return `\\U${codePoint.toString(16).padStart(8, '0')}`;
+      return `\\u${codePoint.toString(16).padStart(4, '0')}`;
+    }
+  }
+}
+
+function relativizeIri(iri: string, baseIRI: string): string {
+  try {
+    const base = new URL(baseIRI);
+    const target = new URL(iri);
+    if (base.origin !== target.origin) return iri;
+    if (base.pathname === target.pathname && base.search === target.search) return target.hash ? `${target.hash}` : '';
+    const directory = base.pathname.endsWith('/') ? base.pathname : base.pathname.slice(0, base.pathname.lastIndexOf('/') + 1);
+    if (target.pathname.startsWith(directory)) return `${target.pathname.slice(directory.length)}${target.search}${target.hash}`;
+    return iri;
+  } catch {
+    return iri.startsWith(baseIRI) ? iri.slice(baseIRI.length) : iri;
+  }
+}
 
 export class Parser {
   public static _resetBlankNodePrefix(): void { globalBlankNodeCounter = 0; }

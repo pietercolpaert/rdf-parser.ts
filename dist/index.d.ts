@@ -20,6 +20,18 @@ interface ParserOptions {
 }
 interface StreamParserOptions extends ParserOptions, TransformOptions {
 }
+interface WriterOptions {
+    format?: string;
+    prefixes?: Record<string, string | NamedNodeLike>;
+    baseIRI?: string;
+    end?: boolean;
+    lists?: Record<string, TermLike[]>;
+}
+interface WriterOutputStream {
+    write(chunk: string, encoding?: BufferEncoding, callback?: (error?: Error | null) => void): unknown;
+    end(callback?: (error?: Error | null, result?: string) => void): unknown;
+}
+type WriterEndCallback = (error?: Error | null, output?: string) => void;
 interface DataFactoryLike {
     namedNode(value: string): NamedNodeLike;
     blankNode(value?: string): BlankNodeLike;
@@ -116,6 +128,64 @@ declare class Message extends Array<QuadLike> {
     constructor(messageCounter: number, quads?: Iterable<QuadLike>);
 }
 declare const DataFactory: DataFactoryLike;
+type WriterTerm = TermLike | SerializedTerm;
+type WriterBlankChild = {
+    predicate: WriterTerm;
+    object: WriterTerm;
+};
+declare class SerializedTerm implements Term {
+    readonly value: string;
+    readonly termType: "BlankNode";
+    constructor(value: string);
+    equals(other: unknown): boolean;
+}
+declare class Writer {
+    private readonly outputStream;
+    private readonly endStream;
+    private readonly lineMode;
+    private readonly lists?;
+    private graph;
+    private subject;
+    private predicate;
+    private prefixByIri;
+    private baseIRI?;
+    private closed;
+    constructor(options?: WriterOptions);
+    constructor(outputStream: WriterOutputStream, options?: WriterOptions);
+    quadToString(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, graph?: WriterTerm): string;
+    quadsToString(quads: Iterable<QuadLike>): string;
+    addQuad(quad: QuadLike, done?: (error?: Error | null) => void): void;
+    addQuad(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, done?: (error?: Error | null) => void): void;
+    addQuad(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, graph: WriterTerm, done?: (error?: Error | null) => void): void;
+    addQuads(quads: Iterable<QuadLike>): void;
+    addPrefix(prefix: string, iri: string | NamedNodeLike, done?: (error?: Error | null) => void): void;
+    addPrefixes(prefixes: Record<string, string | NamedNodeLike>, done?: (error?: Error | null) => void): void;
+    blank(): TermLike;
+    blank(children: WriterBlankChild[]): TermLike;
+    blank(child: WriterBlankChild): TermLike;
+    blank(predicate: WriterTerm, object: WriterTerm): TermLike;
+    list(elements?: WriterTerm[]): TermLike;
+    end(done?: WriterEndCallback): void;
+    private writePrettyQuad;
+    private closeCurrentStatement;
+    private encodeSubject;
+    private encodePredicate;
+    private encodeObject;
+    private encodeIriOrBlank;
+    private encodeLiteral;
+    private encodeQuad;
+    private toPrefixedName;
+    private escapeIri;
+    private write;
+    private assertOpen;
+}
+declare class StreamWriter extends Transform {
+    private readonly writer;
+    constructor(options?: WriterOptions);
+    import(stream: Readable): this;
+    _transform(quad: QuadLike, _encoding: BufferEncoding, callback: TransformCallback): void;
+    _flush(callback: TransformCallback): void;
+}
 declare class Parser {
     static _resetBlankNodePrefix(): void;
     _factory: DataFactoryLike;
@@ -162,4 +232,4 @@ declare const variable: ((value: string) => VariableLike) | undefined;
 declare const defaultGraph: () => DefaultGraphLike;
 declare const quad: (subject: TermLike, predicate: TermLike, object: TermLike, graph?: TermLike) => QuadLike;
 
-export { BlankNode, type BlankNodeLike, DataFactory, type DataFactoryLike, DefaultGraph, type DefaultGraphLike, IncrementalParser, Literal, type LiteralLike, Message, type MessageQuad, type MessageQuadArray, NamedNode, type NamedNodeLike, type ParseCallback, Parser, type ParserEventCallbacks, type ParserOptions, type ParserOutput, type ParserOutputItem, Quad, type QuadLike, StreamParser, type StreamParserOptions, type Term, type TermLike, type TermType, Variable, type VariableLike, blankNode, defaultGraph, isMessageQuad, literal, namedNode, quad, quadToString, termFromId, termToId, termToString, toMessages, variable };
+export { BlankNode, type BlankNodeLike, DataFactory, type DataFactoryLike, DefaultGraph, type DefaultGraphLike, IncrementalParser, Literal, type LiteralLike, Message, type MessageQuad, type MessageQuadArray, NamedNode, type NamedNodeLike, type ParseCallback, Parser, type ParserEventCallbacks, type ParserOptions, type ParserOutput, type ParserOutputItem, Quad, type QuadLike, StreamParser, type StreamParserOptions, StreamWriter, type Term, type TermLike, type TermType, Variable, type VariableLike, Writer, type WriterEndCallback, type WriterOptions, type WriterOutputStream, blankNode, defaultGraph, isMessageQuad, literal, namedNode, quad, quadToString, termFromId, termToId, termToString, toMessages, variable };
