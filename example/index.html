@@ -231,6 +231,7 @@ ex:m2 ex:p ex:o2 .</textarea>
         <p class="hint">Relaxed mode passes <code>relax: true</code> to the parser for more permissive parsing.</p>
 
         <button id="run" type="submit">Parse and serialize</button>
+        <button id="stop" class="secondary" type="button" disabled>Stop</button>
         <button id="copy" class="secondary" type="button" disabled>Copy output</button>
         <p id="status" class="status" aria-live="polite">Ready.</p>
       </form>
@@ -272,6 +273,7 @@ ex:m2 ex:p ex:o2 .</textarea>
     const outputFormat = document.querySelector('#output-format');
     const relaxInput = document.querySelector('#relax');
     const runButton = document.querySelector('#run');
+    const stopButton = document.querySelector('#stop');
     const copyButton = document.querySelector('#copy');
     const copyCodeButton = document.querySelector('#copy-code');
     const status = document.querySelector('#status');
@@ -289,6 +291,8 @@ ex:m2 ex:p ex:o2 .</textarea>
 
     let latestOutput = '';
     let latestDemoCode = '';
+  let activeController;
+  let stopRequested = false;
 
     for (const input of sourceInputs) {
       input.addEventListener('change', () => {
@@ -310,6 +314,13 @@ ex:m2 ex:p ex:o2 .</textarea>
       status.textContent = 'Copied browser demo code.';
     });
 
+    stopButton.addEventListener('click', () => {
+      stopRequested = true;
+      activeController?.abort();
+      stopButton.disabled = true;
+      status.textContent = 'Stopping… finalizing partial output.';
+    });
+
     form.addEventListener('submit', async event => {
       event.preventDefault();
       latestOutput = '';
@@ -319,32 +330,42 @@ ex:m2 ex:p ex:o2 .</textarea>
       copyButton.disabled = true;
       copyCodeButton.disabled = true;
       runButton.disabled = true;
+      stopButton.disabled = false;
+      stopRequested = false;
+      activeController = new AbortController();
       resetMetrics();
       const start = performance.now();
       const items = [];
+      let detected;
+      let sourceMode = getSourceMode();
+      let sourceUrl = '';
+      let writer;
+      let liveOutput;
+      let writerOptions;
 
       try {
-        const sourceMode = getSourceMode();
-        let detected;
-        let sourceUrl = '';
         if (sourceMode === 'url') {
           sourceUrl = urlInput.value.trim();
           if (!sourceUrl) throw new Error('Enter a URL or switch to text input.');
           status.textContent = 'Fetching URL…';
           await nextFrame();
-          const response = await fetch(sourceUrl);
+          const response = await fetch(sourceUrl, { signal: activeController.signal });
           if (!response.ok) throw new Error(`Fetch failed with HTTP ${response.status}.`);
           detected = detectFormat({ url: response.url || sourceUrl, contentType: response.headers.get('content-type') || '' });
           metrics.detectedFormat.textContent = detected.label;
           const parserOptions = createParserOptions(detected, response.url || sourceUrl);
+          writerOptions = createWriterOptions(detected, outputFormat.value);
+          ({ writer, liveOutput } = createLiveWriter(writerOptions));
           if (response.body) {
-            status.textContent = 'Streaming and parsing…';
-            await readStream(response.body, parserOptions, start, items);
+            status.textContent = 'Streaming, parsing, and writing output…';
+            await readStream(response.body, parserOptions, start, items, writer, activeController.signal);
           } else {
             const text = await response.text();
             detected = detectFormat({ url: response.url || sourceUrl, contentType: response.headers.get('content-type') || '', text });
             metrics.detectedFormat.textContent = detected.label;
-            parseText(text, createParserOptions(detected, response.url || sourceUrl), items);
+            writerOptions = createWriterOptions(detected, outputFormat.value);
+            ({ writer, liveOutput } = createLiveWriter(writerOptions));
+            parseText(text, createParserOptions(detected, response.url || sourceUrl), items, writer);
             updateMetrics(start, items);
           }
         } else {
@@ -352,15 +373,16 @@ ex:m2 ex:p ex:o2 .</textarea>
           if (!text.trim()) throw new Error('Paste RDF text or switch to URL input.');
           detected = detectFormat({ text });
           metrics.detectedFormat.textContent = detected.label;
-          status.textContent = 'Streaming and parsing text…';
+          writerOptions = createWriterOptions(detected, outputFormat.value);
+          ({ writer, liveOutput } = createLiveWriter(writerOptions));
+          status.textContent = 'Streaming, parsing, and writing text…';
           await nextFrame();
-          await readStream(new Blob([text]).stream(), createParserOptions(detected, ''), start, items);
+          await readStream(new Blob([text]).stream(), createParserOptions(detected, ''), start, items, writer, activeController.signal);
         }
 
-        status.textContent = 'Serializing output…';
+        status.textContent = 'Finalizing output…';
         await nextFrame();
-        const writerOptions = createWriterOptions(detected, outputFormat.value);
-        latestOutput = await serialize(items, writerOptions);
+        latestOutput = writer ? await finishWriter(writer, liveOutput) : '';
         output.textContent = latestOutput;
         latestDemoCode = createDemoCode({
           sourceMode,
@@ -373,11 +395,21 @@ ex:m2 ex:p ex:o2 .</textarea>
         updateMetrics(start, items);
         copyButton.disabled = false;
         copyCodeButton.disabled = false;
-        status.textContent = `Done. ${items.length.toLocaleString()} output entr${items.length === 1 ? 'y' : 'ies'} serialized. Project code is available under “Use this in your project”.`;
+        status.textContent = `${stopRequested ? 'Stopped' : 'Done'}. ${items.length.toLocaleString()} output entr${items.length === 1 ? 'y' : 'ies'} serialized. Project code is available under “Use this in your project”.`;
       } catch (error) {
-        status.textContent = error instanceof Error ? error.message : String(error);
+        if (stopRequested || error?.name === 'AbortError') {
+          latestOutput = writer ? await finishWriter(writer, liveOutput) : latestOutput;
+          output.textContent = latestOutput;
+          updateMetrics(start, items);
+          if (latestOutput) copyButton.disabled = false;
+          status.textContent = `Stopped. ${items.length.toLocaleString()} output entr${items.length === 1 ? 'y' : 'ies'} serialized.`;
+        } else {
+          status.textContent = error instanceof Error ? error.message : String(error);
+        }
       } finally {
         runButton.disabled = false;
+        stopButton.disabled = true;
+        activeController = undefined;
       }
     });
 
@@ -462,40 +494,92 @@ ex:m2 ex:p ex:o2 .</textarea>
 
     function createWriterOptions(detected, format) {
       const options = { format };
+      if (detected.rdfMessages) options.rdfMessages = true;
       if (detected.version && detected.rdfMessages) options.version = detected.version;
       return options;
     }
 
-    function parseText(text, parserOptions, items) {
+    function createLiveWriter(writerOptions) {
+      let buffered = '';
+      let flushScheduled = false;
+      const liveOutput = {
+        flush() {
+          flushScheduled = false;
+          latestOutput = buffered;
+          output.textContent = buffered;
+        },
+        scheduleFlush() {
+          if (flushScheduled) return;
+          flushScheduled = true;
+          requestAnimationFrame(() => liveOutput.flush());
+        },
+        stream: {
+          write(chunk, _encoding, callback) {
+            buffered += chunk;
+            latestOutput = buffered;
+            liveOutput.scheduleFlush();
+            callback?.(null);
+          },
+          end(callback) {
+            liveOutput.flush();
+            callback?.(null, buffered);
+          },
+        },
+      };
+      return { writer: new Writer(liveOutput.stream, writerOptions), liveOutput };
+    }
+
+    function parseText(text, parserOptions, items, writer) {
       const parser = new Parser(parserOptions);
       const parsed = parser.parse(text) || [];
       items.push(...parsed);
+      for (const item of parsed) writeItem(writer, item);
     }
 
-    async function readStream(body, parserOptions, start, items) {
+    async function readStream(body, parserOptions, start, items, writer, signal) {
       const parser = new StreamParser(parserOptions);
       const reader = parser.import(body).getReader();
+      const cancelReader = () => reader.cancel('Stopped by user').catch(() => undefined);
+      signal?.addEventListener('abort', cancelReader, { once: true });
       let lastUpdate = performance.now();
-      while (true) {
-        const result = await reader.read();
-        if (result.done) break;
-        items.push(result.value);
-        const now = performance.now();
-        if (now - lastUpdate > 120) {
-          updateMetrics(start, items);
-          status.textContent = `Parsing… ${countQuads(items).toLocaleString()} quads so far.`;
-          lastUpdate = now;
-          await nextFrame();
+      try {
+        while (true) {
+          if (signal?.aborted) break;
+          const result = await reader.read();
+          if (result.done) break;
+          items.push(result.value);
+          writeItem(writer, result.value);
+          const now = performance.now();
+          if (now - lastUpdate > 120) {
+            updateMetrics(start, items);
+            status.textContent = `Parsing and writing… ${countQuads(items).toLocaleString()} quads so far.`;
+            lastUpdate = now;
+            await nextFrame();
+          }
         }
+      } finally {
+        signal?.removeEventListener('abort', cancelReader);
       }
       updateMetrics(start, items);
     }
 
-    async function serialize(items, writerOptions) {
-      const writer = new Writer(writerOptions);
-      writer.addQuads(items);
+    function writeItem(writer, item) {
+      let writeError;
+      writer.addQuad(item, error => {
+        if (error) writeError = error;
+      });
+      if (writeError) throw writeError;
+    }
+
+    async function finishWriter(writer, liveOutput) {
       return new Promise((resolve, reject) => {
-        writer.end((error, result) => error ? reject(error) : resolve(result || ''));
+        writer.end((error, result) => {
+          if (error) reject(error);
+          else {
+            liveOutput?.flush();
+            resolve(result || latestOutput || '');
+          }
+        });
       });
     }
 
@@ -513,16 +597,23 @@ const writerOptions = ${writerOptionsSource};
 ${sourceSetup}
 
 const parser = new StreamParser(parserOptions);
-const items = [];
+let serialized = '';
+const writer = new Writer({
+  write(chunk, _encoding, callback) {
+    serialized += chunk;
+    // Update your UI with the partial serialized output here.
+    callback?.(null);
+  },
+  end(callback) {
+    callback?.(null, serialized);
+  },
+}, writerOptions);
 
 for await (const item of inputStream.pipeThrough(parser)) {
-  items.push(item);
+  writer.addQuad(item);
 }
 
-const writer = new Writer(writerOptions);
-writer.addQuads(items);
-
-const serialized = await new Promise((resolve, reject) => {
+serialized = await new Promise((resolve, reject) => {
   writer.end((error, result) => error ? reject(error) : resolve(result || ''));
 });
 
