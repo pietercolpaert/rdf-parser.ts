@@ -26,6 +26,9 @@ interface WriterOptions {
     baseIRI?: string;
     end?: boolean;
     lists?: Record<string, TermLike[]>;
+    rdfMessages?: boolean;
+    messages?: boolean;
+    version?: string;
 }
 interface WriterOutputStream {
     write(chunk: string, encoding?: BufferEncoding, callback?: (error?: Error | null) => void): unknown;
@@ -129,6 +132,7 @@ declare class Message extends Array<QuadLike> {
 }
 declare const DataFactory: DataFactoryLike;
 type WriterTerm = TermLike | SerializedTerm;
+type WriterInputItem = QuadLike | MessageQuad;
 type WriterBlankChild = {
     predicate: WriterTerm;
     object: WriterTerm;
@@ -150,14 +154,20 @@ declare class Writer {
     private prefixByIri;
     private baseIRI?;
     private closed;
+    private messagesEnabled;
+    private messageVersion;
+    private messagesStarted;
+    private currentMessageCounter;
+    private hasWrittenMessage;
     constructor(options?: WriterOptions);
     constructor(outputStream: WriterOutputStream, options?: WriterOptions);
     quadToString(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, graph?: WriterTerm): string;
     quadsToString(quads: Iterable<QuadLike>): string;
-    addQuad(quad: QuadLike, done?: (error?: Error | null) => void): void;
+    addQuad(quad: WriterInputItem, done?: (error?: Error | null) => void): void;
     addQuad(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, done?: (error?: Error | null) => void): void;
     addQuad(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, graph: WriterTerm, done?: (error?: Error | null) => void): void;
-    addQuads(quads: Iterable<QuadLike>): void;
+    addQuads(quads: Iterable<WriterInputItem>): void;
+    addMessage(message: Iterable<QuadLike> | Message, done?: (error?: Error | null) => void): void;
     addPrefix(prefix: string, iri: string | NamedNodeLike, done?: (error?: Error | null) => void): void;
     addPrefixes(prefixes: Record<string, string | NamedNodeLike>, done?: (error?: Error | null) => void): void;
     blank(): TermLike;
@@ -167,6 +177,10 @@ declare class Writer {
     list(elements?: WriterTerm[]): TermLike;
     end(done?: WriterEndCallback): void;
     private writePrettyQuad;
+    private writeQuadTerms;
+    private writeMessageQuad;
+    private ensureMessagesStarted;
+    private writeMessageDelimiter;
     private closeCurrentStatement;
     private encodeSubject;
     private encodePredicate;
@@ -183,7 +197,7 @@ declare class StreamWriter extends Transform {
     private readonly writer;
     constructor(options?: WriterOptions);
     import(stream: Readable): this;
-    _transform(quad: QuadLike, _encoding: BufferEncoding, callback: TransformCallback): void;
+    _transform(quad: WriterInputItem, _encoding: BufferEncoding, callback: TransformCallback): void;
     _flush(callback: TransformCallback): void;
 }
 declare class Parser {

@@ -30,6 +30,9 @@ export interface WriterOptions {
   baseIRI?: string;
   end?: boolean;
   lists?: Record<string, TermLike[]>;
+  rdfMessages?: boolean;
+  messages?: boolean;
+  version?: string;
 }
 
 export interface WriterOutputStream {
@@ -217,6 +220,7 @@ export const DataFactory: DataFactoryLike = {
 };
 
 type WriterTerm = TermLike | SerializedTerm;
+type WriterInputItem = QuadLike | MessageQuad;
 type WriterQuadLike = Omit<QuadLike, 'subject' | 'predicate' | 'object' | 'graph'> & {
   subject: WriterTerm;
   predicate: WriterTerm;
@@ -242,6 +246,11 @@ export class Writer {
   private prefixByIri: Record<string, string> | undefined;
   private baseIRI?: string;
   private closed = false;
+  private messagesEnabled = false;
+  private messageVersion = '1.2-messages';
+  private messagesStarted = false;
+  private currentMessageCounter = 0;
+  private hasWrittenMessage = false;
 
   public constructor(options?: WriterOptions);
   public constructor(outputStream: WriterOutputStream, options?: WriterOptions);
@@ -272,6 +281,8 @@ export class Writer {
 
     this.lineMode = /(?:n-)?(?:triple|quad)s?/i.test(options.format ?? '');
     this.lists = options.lists;
+    this.messagesEnabled = options.rdfMessages === true || options.messages === true || isMessagesVersion(options.version);
+    if (options.version && isMessagesVersion(options.version)) this.messageVersion = options.version;
     if (!this.lineMode) {
       this.prefixByIri = Object.create(null) as Record<string, string>;
       if (options.baseIRI) this.baseIRI = options.baseIRI;
@@ -290,11 +301,11 @@ export class Writer {
     return output;
   }
 
-  public addQuad(quad: QuadLike, done?: (error?: Error | null) => void): void;
+  public addQuad(quad: WriterInputItem, done?: (error?: Error | null) => void): void;
   public addQuad(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, done?: (error?: Error | null) => void): void;
   public addQuad(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, graph: WriterTerm, done?: (error?: Error | null) => void): void;
   public addQuad(
-    subjectOrQuad: WriterTerm | QuadLike,
+    subjectOrQuad: WriterTerm | WriterInputItem,
     predicateOrDone?: WriterTerm | ((error?: Error | null) => void),
     object?: WriterTerm,
     graphOrDone?: WriterTerm | ((error?: Error | null) => void),
@@ -307,6 +318,12 @@ export class Writer {
       let quadObject: WriterTerm;
       let graph: WriterTerm;
       let callback = done;
+
+      if (object === undefined && isMessageQuad(subjectOrQuad)) {
+        callback = typeof predicateOrDone === 'function' ? predicateOrDone : done;
+        this.writeMessageQuad(subjectOrQuad, callback);
+        return;
+      }
 
       if (object === undefined && isQuadLike(subjectOrQuad)) {
         subject = subjectOrQuad.subject;
@@ -327,8 +344,9 @@ export class Writer {
         }
       }
 
-      if (this.lineMode) this.write(this.quadToString(subject, predicate, quadObject, graph), callback);
-      else this.writePrettyQuad(subject, predicate, quadObject, graph, callback);
+      if (this.messagesEnabled) this.ensureMessagesStarted();
+      this.writeQuadTerms(subject, predicate, quadObject, graph, callback);
+      if (this.messagesEnabled) this.hasWrittenMessage = true;
     } catch (error) {
       const callback = typeof predicateOrDone === 'function' ? predicateOrDone :
         typeof graphOrDone === 'function' ? graphOrDone : done;
@@ -336,8 +354,21 @@ export class Writer {
     }
   }
 
-  public addQuads(quads: Iterable<QuadLike>): void {
+  public addQuads(quads: Iterable<WriterInputItem>): void {
     for (const quad of quads) this.addQuad(quad);
+  }
+
+  public addMessage(message: Iterable<QuadLike> | Message, done?: (error?: Error | null) => void): void {
+    try {
+      this.assertOpen();
+      this.ensureMessagesStarted();
+      if (this.hasWrittenMessage) this.writeMessageDelimiter();
+      for (const quad of message) this.writeQuadTerms(quad.subject, quad.predicate, quad.object, quad.graph);
+      this.hasWrittenMessage = true;
+      done?.(null);
+    } catch (error) {
+      done?.(error instanceof Error ? error : new Error(String(error)));
+    }
   }
 
   public addPrefix(prefix: string, iri: string | NamedNodeLike, done?: (error?: Error | null) => void): void {
@@ -450,6 +481,39 @@ export class Writer {
     this.subject = subject;
     this.predicate = predicate;
     this.write(`${separator}${this.encodeSubject(subject)} ${this.encodePredicate(predicate)} ${this.encodeObject(object)}`, done);
+  }
+
+  private writeQuadTerms(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, graph: WriterTerm, done?: (error?: Error | null) => void): void {
+    if (this.lineMode) this.write(this.quadToString(subject, predicate, object, graph), done);
+    else this.writePrettyQuad(subject, predicate, object, graph, done);
+  }
+
+  private writeMessageQuad(entry: MessageQuad, done?: (error?: Error | null) => void): void {
+    if (!Number.isInteger(entry.messageCounter) || entry.messageCounter < 0) {
+      throw new Error(`Invalid message counter ${entry.messageCounter}.`);
+    }
+    this.ensureMessagesStarted();
+    if (entry.messageCounter < this.currentMessageCounter) {
+      throw new Error(`Cannot write message counter ${entry.messageCounter} after ${this.currentMessageCounter}.`);
+    }
+    while (this.currentMessageCounter < entry.messageCounter) this.writeMessageDelimiter();
+    this.writeQuadTerms(entry.quad.subject, entry.quad.predicate, entry.quad.object, entry.quad.graph, done);
+    this.hasWrittenMessage = true;
+  }
+
+  private ensureMessagesStarted(): void {
+    this.messagesEnabled = true;
+    if (this.messagesStarted) return;
+    if (this.subject !== null) this.closeCurrentStatement();
+    this.write(this.lineMode ? `VERSION "${escapeLiteral(this.messageVersion)}"\n` : `@version "${escapeLiteral(this.messageVersion)}" .\n`);
+    this.messagesStarted = true;
+    this.currentMessageCounter = 0;
+  }
+
+  private writeMessageDelimiter(): void {
+    if (this.subject !== null) this.closeCurrentStatement();
+    this.write(this.lineMode ? 'MESSAGE\n' : '@message .\n');
+    this.currentMessageCounter++;
   }
 
   private closeCurrentStatement(): void {
@@ -578,7 +642,7 @@ export class StreamWriter extends Transform {
     return this;
   }
 
-  public override _transform(quad: QuadLike, _encoding: BufferEncoding, callback: TransformCallback): void {
+  public override _transform(quad: WriterInputItem, _encoding: BufferEncoding, callback: TransformCallback): void {
     this.writer.addQuad(quad, callback);
   }
 

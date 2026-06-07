@@ -44,7 +44,7 @@ export type {
   WriterOptions,
 } from '../index';
 
-import type { NamedNodeLike, ParserOptions, ParserOutputItem, QuadLike, TermLike, WriterOptions } from '../index';
+import type { Message, MessageQuad, NamedNodeLike, ParserOptions, ParserOutputItem, QuadLike, TermLike, WriterOptions } from '../index';
 
 type BrowserStreamChunk = string | Uint8Array | ArrayBuffer;
 type BrowserWriterOutputStream = {
@@ -60,10 +60,11 @@ export declare class Writer {
   constructor(outputStream: BrowserWriterOutputStream, options?: WriterOptions);
   quadToString(subject: TermLike, predicate: TermLike, object: TermLike, graph?: TermLike): string;
   quadsToString(quads: Iterable<QuadLike>): string;
-  addQuad(quad: QuadLike, done?: (error?: Error | null) => void): void;
+  addQuad(quad: QuadLike | MessageQuad, done?: (error?: Error | null) => void): void;
   addQuad(subject: TermLike, predicate: TermLike, object: TermLike, done?: (error?: Error | null) => void): void;
   addQuad(subject: TermLike, predicate: TermLike, object: TermLike, graph: TermLike, done?: (error?: Error | null) => void): void;
-  addQuads(quads: Iterable<QuadLike>): void;
+  addQuads(quads: Iterable<QuadLike | MessageQuad>): void;
+  addMessage(message: Iterable<QuadLike> | Message, done?: (error?: Error | null) => void): void;
   addPrefix(prefix: string, iri: string | NamedNodeLike, done?: (error?: Error | null) => void): void;
   addPrefixes(prefixes: Record<string, string | NamedNodeLike>, done?: (error?: Error | null) => void): void;
   blank(): TermLike;

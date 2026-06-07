@@ -199,6 +199,11 @@ var Writer = class {
   prefixByIri;
   baseIRI;
   closed = false;
+  messagesEnabled = false;
+  messageVersion = "1.2-messages";
+  messagesStarted = false;
+  currentMessageCounter = 0;
+  hasWrittenMessage = false;
   constructor(outputStreamOrOptions, maybeOptions) {
     let outputStream;
     let options;
@@ -224,6 +229,8 @@ var Writer = class {
     }
     this.lineMode = /(?:n-)?(?:triple|quad)s?/i.test(options.format ?? "");
     this.lists = options.lists;
+    this.messagesEnabled = options.rdfMessages === true || options.messages === true || isMessagesVersion(options.version);
+    if (options.version && isMessagesVersion(options.version)) this.messageVersion = options.version;
     if (!this.lineMode) {
       this.prefixByIri = /* @__PURE__ */ Object.create(null);
       if (options.baseIRI) this.baseIRI = options.baseIRI;
@@ -248,6 +255,11 @@ var Writer = class {
       let quadObject;
       let graph;
       let callback = done;
+      if (object === void 0 && isMessageQuad(subjectOrQuad)) {
+        callback = typeof predicateOrDone === "function" ? predicateOrDone : done;
+        this.writeMessageQuad(subjectOrQuad, callback);
+        return;
+      }
       if (object === void 0 && isQuadLike(subjectOrQuad)) {
         subject = subjectOrQuad.subject;
         predicate = subjectOrQuad.predicate;
@@ -266,8 +278,9 @@ var Writer = class {
           graph = graphOrDone ?? defaultGraphSingleton;
         }
       }
-      if (this.lineMode) this.write(this.quadToString(subject, predicate, quadObject, graph), callback);
-      else this.writePrettyQuad(subject, predicate, quadObject, graph, callback);
+      if (this.messagesEnabled) this.ensureMessagesStarted();
+      this.writeQuadTerms(subject, predicate, quadObject, graph, callback);
+      if (this.messagesEnabled) this.hasWrittenMessage = true;
     } catch (error) {
       const callback = typeof predicateOrDone === "function" ? predicateOrDone : typeof graphOrDone === "function" ? graphOrDone : done;
       callback?.(error instanceof Error ? error : new Error(String(error)));
@@ -275,6 +288,18 @@ var Writer = class {
   }
   addQuads(quads) {
     for (const quad2 of quads) this.addQuad(quad2);
+  }
+  addMessage(message, done) {
+    try {
+      this.assertOpen();
+      this.ensureMessagesStarted();
+      if (this.hasWrittenMessage) this.writeMessageDelimiter();
+      for (const quad2 of message) this.writeQuadTerms(quad2.subject, quad2.predicate, quad2.object, quad2.graph);
+      this.hasWrittenMessage = true;
+      done?.(null);
+    } catch (error) {
+      done?.(error instanceof Error ? error : new Error(String(error)));
+    }
   }
   addPrefix(prefix, iri, done) {
     this.addPrefixes({ [prefix]: iri }, done);
@@ -375,6 +400,37 @@ var Writer = class {
     this.subject = subject;
     this.predicate = predicate;
     this.write(`${separator}${this.encodeSubject(subject)} ${this.encodePredicate(predicate)} ${this.encodeObject(object)}`, done);
+  }
+  writeQuadTerms(subject, predicate, object, graph, done) {
+    if (this.lineMode) this.write(this.quadToString(subject, predicate, object, graph), done);
+    else this.writePrettyQuad(subject, predicate, object, graph, done);
+  }
+  writeMessageQuad(entry, done) {
+    if (!Number.isInteger(entry.messageCounter) || entry.messageCounter < 0) {
+      throw new Error(`Invalid message counter ${entry.messageCounter}.`);
+    }
+    this.ensureMessagesStarted();
+    if (entry.messageCounter < this.currentMessageCounter) {
+      throw new Error(`Cannot write message counter ${entry.messageCounter} after ${this.currentMessageCounter}.`);
+    }
+    while (this.currentMessageCounter < entry.messageCounter) this.writeMessageDelimiter();
+    this.writeQuadTerms(entry.quad.subject, entry.quad.predicate, entry.quad.object, entry.quad.graph, done);
+    this.hasWrittenMessage = true;
+  }
+  ensureMessagesStarted() {
+    this.messagesEnabled = true;
+    if (this.messagesStarted) return;
+    if (this.subject !== null) this.closeCurrentStatement();
+    this.write(this.lineMode ? `VERSION "${escapeLiteral(this.messageVersion)}"
+` : `@version "${escapeLiteral(this.messageVersion)}" .
+`);
+    this.messagesStarted = true;
+    this.currentMessageCounter = 0;
+  }
+  writeMessageDelimiter() {
+    if (this.subject !== null) this.closeCurrentStatement();
+    this.write(this.lineMode ? "MESSAGE\n" : "@message .\n");
+    this.currentMessageCounter++;
   }
   closeCurrentStatement() {
     this.write(this.graph.termType === "DefaultGraph" ? ".\n" : "\n}\n");

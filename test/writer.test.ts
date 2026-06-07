@@ -4,10 +4,14 @@ import {
   BlankNode,
   DataFactory,
   Literal,
+  Parser,
   NamedNode,
   Quad,
   StreamWriter,
   Writer,
+  isMessageQuad,
+  toMessages,
+  type MessageQuad,
   type QuadLike,
 } from '../src';
 
@@ -187,6 +191,54 @@ describe('Writer', () => {
     writer.addQuads([new Quad(nn('s'), nn('p'), nn('o2'))]);
     await expect(endWriter(writer)).resolves.toBe('<s> <p> <o1>, <o2>.\n');
   });
+
+  it('serializes RDF Message logs from MessageQuad entries in line mode', async () => {
+    const writer = new Writer({ format: 'N-Quads' });
+    writer.addQuads([
+      { quad: quad('http://example.org/s1', 'http://example.org/p', 'http://example.org/o1'), messageCounter: 0 },
+      { quad: quad('http://example.org/s2', 'http://example.org/p', 'http://example.org/o2'), messageCounter: 1 },
+      { quad: quad('http://example.org/s3', 'http://example.org/p', 'http://example.org/o3'), messageCounter: 3 },
+    ]);
+
+    const output = await endWriter(writer);
+    expect(output).toBe('VERSION "1.2-messages"\n' +
+      '<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .\n' +
+      'MESSAGE\n' +
+      '<http://example.org/s2> <http://example.org/p> <http://example.org/o2> .\n' +
+      'MESSAGE\n' +
+      'MESSAGE\n' +
+      '<http://example.org/s3> <http://example.org/p> <http://example.org/o3> .\n');
+
+    const parsed = new Parser({ format: 'N-Quads', rdfMessages: true }).parse(output) ?? [];
+    expect(parsed.every(isMessageQuad)).toBe(true);
+    expect(toMessages(parsed).map(message => message.map(entry => entry.subject.value))).toEqual([
+      ['http://example.org/s1'],
+      ['http://example.org/s2'],
+      [],
+      ['http://example.org/s3'],
+    ]);
+  });
+
+  it('serializes RDF Message logs with addMessage in Turtle/TriG mode', async () => {
+    const writer = new Writer({ prefixes: { ex: 'http://example.org/' }, version: '1.2-messages' });
+    writer.addMessage([quad('http://example.org/s1', 'http://example.org/p', 'http://example.org/o1')]);
+    writer.addMessage([]);
+    writer.addMessage([quad('http://example.org/s2', 'http://example.org/p', 'http://example.org/o2')]);
+
+    const output = await endWriter(writer);
+    expect(output).toBe('@prefix ex: <http://example.org/>.\n\n' +
+      '@version "1.2-messages" .\n' +
+      'ex:s1 ex:p ex:o1.\n' +
+      '@message .\n' +
+      '@message .\n' +
+      'ex:s2 ex:p ex:o2.\n');
+
+    expect(new Parser().parseMessages(output).map(message => message.map(entry => entry.subject.value))).toEqual([
+      ['http://example.org/s1'],
+      [],
+      ['http://example.org/s2'],
+    ]);
+  });
 });
 
 describe('StreamWriter', () => {
@@ -214,5 +266,19 @@ describe('StreamWriter', () => {
     input.push(null);
     await expect(collectStream(writer)).resolves.toBe('@prefix ex: <https://example.org/>.\n\nex:s ex:p ex:o.\n');
     expect(errors.map(error => error.message)).toEqual(['upstream']);
+  });
+
+  it('serializes streamed MessageQuad entries as RDF Message logs', async () => {
+    const input = Readable.from([
+      { quad: quad('http://example.org/s1', 'http://example.org/p', 'http://example.org/o1'), messageCounter: 0 },
+      { quad: quad('http://example.org/s2', 'http://example.org/p', 'http://example.org/o2'), messageCounter: 1 },
+    ] satisfies MessageQuad[], { objectMode: true });
+    const writer = new StreamWriter({ format: 'N-Quads' });
+
+    writer.import(input);
+    await expect(collectStream(writer)).resolves.toBe('VERSION "1.2-messages"\n' +
+      '<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .\n' +
+      'MESSAGE\n' +
+      '<http://example.org/s2> <http://example.org/p> <http://example.org/o2> .\n');
   });
 });

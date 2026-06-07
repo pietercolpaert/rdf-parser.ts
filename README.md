@@ -137,8 +137,8 @@ Current browser bundle sizes after `npm run build`:
 
 | Bundle | Raw | gzip |
 | --- | ---: | ---: |
-| `dist/browser/index.mjs` | 34,460 bytes (33.7 KiB) | 9,532 bytes (9.3 KiB) |
-| `dist/browser/index.global.js` | 34,943 bytes (34.1 KiB) | 9,716 bytes (9.5 KiB) |
+| `dist/browser/index.mjs` | 36,229 bytes (35.4 KiB) | 9,869 bytes (9.6 KiB) |
+| `dist/browser/index.global.js` | 36,712 bytes (35.9 KiB) | 10,058 bytes (9.8 KiB) |
 
 ## Parsing strings
 
@@ -208,6 +208,56 @@ writer.end((error, output) => {
 ```
 
 `Writer` also supports blank-node property-list helpers through `blank()`, RDF list helpers through `list()`, RDF-star quoted triples/quads, base IRI shortening, datatype/language literal serialization, and output streams. On Node.js, `StreamWriter` is a `Transform` stream in object mode for serializing quad streams to text.
+
+`Writer` can also serialize RDF Message Logs. In line formats such as N-Quads, it writes `VERSION "1.2-messages"` and `MESSAGE` delimiters. In Turtle/TriG-style output, it writes `@version "1.2-messages" .` and `@message .` delimiters.
+
+One option is to pass message quads directly, which is useful when piping parser output or streaming message entries. Gaps in `messageCounter` values are preserved as empty messages.
+
+```ts
+import { Parser, Writer, isMessageQuad } from 'rdf-parser-ts';
+
+const output = new Parser({ format: 'N-Quads', rdfMessages: true }).parse(`
+  <http://example.org/s1> <http://example.org/p> <http://example.org/o1> .
+  MESSAGE
+  <http://example.org/s2> <http://example.org/p> <http://example.org/o2> .
+`);
+
+const writer = new Writer({ format: 'N-Quads' });
+
+for (const item of output ?? []) {
+  writer.addQuad(isMessageQuad(item) ? item : { quad: item, messageCounter: 0 });
+}
+
+writer.end((error, serialized) => {
+  if (error) throw error;
+  console.log(serialized);
+});
+```
+
+Alternatively, call `addMessage()` with the quads belonging to each message:
+
+```ts
+import { DataFactory, Writer } from 'rdf-parser-ts';
+
+const { namedNode, quad } = DataFactory;
+
+const writer = new Writer({ prefixes: { ex: 'http://example.org/' }, version: '1.2-messages' });
+
+writer.addMessage([
+  quad(namedNode('http://example.org/s1'), namedNode('http://example.org/p'), namedNode('http://example.org/o1')),
+]);
+writer.addMessage([]); // preserve an empty message
+writer.addMessage([
+  quad(namedNode('http://example.org/s2'), namedNode('http://example.org/p'), namedNode('http://example.org/o2')),
+]);
+
+writer.end((error, serialized) => {
+  if (error) throw error;
+  console.log(serialized);
+});
+```
+
+`StreamWriter` accepts both RDF-JS quads and `{ quad, messageCounter }` entries, so `new StreamParser({ rdfMessages: true }).pipe(new StreamWriter({ format: 'N-Quads' }))` preserves message boundaries.
 
 ## RDF Messages
 
@@ -427,15 +477,6 @@ node perf/bench.js --sizes 10000,50000 --no-triple-terms
 ```
 
 Graphy 4.x's N-Quads reader does not parse RDF1.2 triple terms, so the default triple-term benchmark prints a skipped Graphy row. Use `--no-triple-terms` or `npm run perf:graphy` for direct `rdf-parser-ts`, N3.js, Graphy, and Graphy relaxed-mode numbers on the same generated line-format input.
-
-### Quick regression check
-
-The latest `npm run perf:regression` run was captured with Node.js v25.9.0 on Linux x64 after `npm run build`. It compares the current build with the git `HEAD` baseline on 100,000 generated N-Quads, taking the best of 3 samples. The CI warning threshold is a 20% throughput drop.
-
-| Scenario | Baseline | Current | Change |
-| --- | ---: | ---: | ---: |
-| `Parser.parse` | 1,428,785 q/s | 1,545,708 q/s | +8.2% |
-| `StreamParser 64KiB` | 957,624 q/s | 990,398 q/s | +3.4% |
 
 ### Quick benchmark snapshot
 
