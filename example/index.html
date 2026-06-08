@@ -291,16 +291,25 @@ ex:m2 ex:p ex:o2 .</textarea>
 
     let latestOutput = '';
     let latestDemoCode = '';
-  let activeController;
-  let stopRequested = false;
+    let activeController;
+    let stopRequested = false;
+    let restoringFormState = false;
+
+    restoreFormStateFromHash();
+    syncSourcePanels();
 
     for (const input of sourceInputs) {
       input.addEventListener('change', () => {
-        const mode = getSourceMode();
-        urlPanel.classList.toggle('hidden', mode !== 'url');
-        textPanel.classList.toggle('hidden', mode !== 'text');
+        syncSourcePanels();
       });
     }
+
+    form.addEventListener('input', updateHashFromForm);
+    form.addEventListener('change', updateHashFromForm);
+    window.addEventListener('hashchange', () => {
+      restoreFormStateFromHash();
+      syncSourcePanels();
+    });
 
     copyButton.addEventListener('click', async () => {
       if (!latestOutput) return;
@@ -417,6 +426,45 @@ ex:m2 ex:p ex:o2 .</textarea>
 
     function getSourceMode() {
       return sourceInputs.find(input => input.checked)?.value || 'url';
+    }
+
+    function syncSourcePanels() {
+      const mode = getSourceMode();
+      urlPanel.classList.toggle('hidden', mode !== 'url');
+      textPanel.classList.toggle('hidden', mode !== 'text');
+    }
+
+    function updateHashFromForm() {
+      if (restoringFormState) return;
+      const params = new URLSearchParams();
+      params.set('source', getSourceMode());
+      params.set('url', urlInput.value);
+      params.set('text', textInput.value);
+      params.set('output', outputFormat.value);
+      params.set('relax', relaxInput.checked ? '1' : '0');
+      const nextUrl = `${window.location.pathname}${window.location.search}#${params.toString()}`;
+      window.history.replaceState(null, '', nextUrl);
+    }
+
+    function restoreFormStateFromHash() {
+      if (!window.location.hash) return;
+      restoringFormState = true;
+      try {
+        const params = new URLSearchParams(window.location.hash.slice(1));
+        const source = params.get('source');
+        if (source === 'url' || source === 'text') {
+          const input = sourceInputs.find(candidate => candidate.value === source);
+          if (input) input.checked = true;
+        }
+        if (params.has('url')) urlInput.value = params.get('url') ?? '';
+        if (params.has('text')) textInput.value = params.get('text') ?? '';
+        if (params.has('output') && [...outputFormat.options].some(option => option.value === params.get('output'))) {
+          outputFormat.value = params.get('output') ?? outputFormat.value;
+        }
+        if (params.has('relax')) relaxInput.checked = /^(?:1|true|yes|on)$/i.test(params.get('relax') ?? '');
+      } finally {
+        restoringFormState = false;
+      }
     }
 
     function resetMetrics() {
