@@ -1,13 +1,9 @@
 import { Transform, type TransformCallback, type TransformOptions, type Readable } from 'node:stream';
 import { StringDecoder } from 'node:string_decoder';
+import type * as RDFJS from '@rdfjs/types';
 
-export type TermType = 'NamedNode' | 'BlankNode' | 'Literal' | 'Variable' | 'DefaultGraph' | 'Quad';
-
-export interface Term {
-  termType: TermType;
-  value: string;
-  equals(other: unknown): boolean;
-}
+export type TermType = RDFJS.Term['termType'];
+export type Term = RDFJS.Term;
 
 export interface ParserOptions {
   baseIRI?: string;
@@ -45,25 +41,19 @@ export type WriterEndCallback = (error?: Error | null, output?: string) => void;
 export interface DataFactoryLike {
   namedNode(value: string): NamedNodeLike;
   blankNode(value?: string): BlankNodeLike;
-  literal(value: string, languageOrDatatype?: string | NamedNodeLike, datatype?: NamedNodeLike): LiteralLike;
+  literal(value: string, languageOrDatatype?: string | NamedNodeLike | RDFJS.DirectionalLanguage, datatype?: NamedNodeLike): LiteralLike;
   variable?(value: string): VariableLike;
   defaultGraph(): DefaultGraphLike;
   quad(subject: TermLike, predicate: TermLike, object: TermLike, graph?: TermLike): QuadLike;
 }
 
-export type TermLike = NamedNodeLike | BlankNodeLike | LiteralLike | VariableLike | DefaultGraphLike | QuadLike;
-export type NamedNodeLike = Term & { termType: 'NamedNode' };
-export type BlankNodeLike = Term & { termType: 'BlankNode' };
-export type VariableLike = Term & { termType: 'Variable' };
-export type DefaultGraphLike = Term & { termType: 'DefaultGraph' };
-export type LiteralLike = Term & { termType: 'Literal'; language: string; datatype: NamedNodeLike; direction?: string };
-export type QuadLike = Term & {
-  termType: 'Quad';
-  subject: TermLike;
-  predicate: TermLike;
-  object: TermLike;
-  graph: TermLike;
-};
+export type TermLike = RDFJS.Term;
+export type NamedNodeLike = RDFJS.NamedNode;
+export type BlankNodeLike = RDFJS.BlankNode;
+export type VariableLike = RDFJS.Variable;
+export type DefaultGraphLike = RDFJS.DefaultGraph;
+export type LiteralLike = RDFJS.Literal;
+export type QuadLike = RDFJS.BaseQuad;
 
 export interface MessageQuad {
   quad: QuadLike;
@@ -115,6 +105,7 @@ const XSD_INTEGER = `${XSD}integer`;
 const XSD_DECIMAL = `${XSD}decimal`;
 const XSD_DOUBLE = `${XSD}double`;
 const XSD_BOOLEAN = `${XSD}boolean`;
+type LiteralDirection = RDFJS.DirectionalLanguage['direction'];
 
 function sameTerm(a: TermLike, b: unknown): boolean {
   if (!b || typeof b !== 'object' || !('termType' in b) || !('value' in b)) return false;
@@ -156,13 +147,13 @@ export class DefaultGraph implements DefaultGraphLike {
 
 export class Literal implements LiteralLike {
   public readonly termType = 'Literal' as const;
-  public readonly direction?: string;
+  public readonly direction?: LiteralDirection;
 
   public constructor(
     public readonly value: string,
     public readonly language = '',
     public readonly datatype: NamedNodeLike = new NamedNode(language ? RDF_LANG_STRING : XSD_STRING),
-    direction?: string,
+    direction?: LiteralDirection,
   ) {
     if (direction) this.direction = direction;
   }
@@ -206,11 +197,19 @@ export const DataFactory: DataFactoryLike = {
       const directionalSeparator = languageOrDatatype.indexOf('--');
       if (directionalSeparator >= 0) {
         const language = languageOrDatatype.slice(0, directionalSeparator).toLowerCase();
-        const direction = languageOrDatatype.slice(directionalSeparator + 2).toLowerCase();
+        const direction = languageOrDatatype.slice(directionalSeparator + 2).toLowerCase() as LiteralDirection;
         return new Literal(value, language, datatype ?? new NamedNode(RDF_LANG_STRING), direction);
       }
       const language = languageOrDatatype.toLowerCase();
       return new Literal(value, language, datatype ?? new NamedNode(language ? RDF_LANG_STRING : XSD_STRING));
+    }
+    if (isDirectionalLanguage(languageOrDatatype)) {
+      return new Literal(
+        value,
+        languageOrDatatype.language.toLowerCase(),
+        datatype ?? new NamedNode(RDF_LANG_STRING),
+        languageOrDatatype.direction,
+      );
     }
     return new Literal(value, '', languageOrDatatype ?? datatype ?? new NamedNode(XSD_STRING));
   },
@@ -218,6 +217,10 @@ export const DataFactory: DataFactoryLike = {
   defaultGraph: () => defaultGraphSingleton,
   quad: (subject, predicate, object, graph = defaultGraphSingleton) => new Quad(subject, predicate, object, graph),
 };
+
+function isDirectionalLanguage(value: unknown): value is RDFJS.DirectionalLanguage {
+  return Boolean(value && typeof value === 'object' && 'language' in value && !('termType' in value));
+}
 
 type WriterTerm = TermLike | SerializedTerm;
 type WriterInputItem = QuadLike | MessageQuad;
@@ -229,7 +232,7 @@ type WriterQuadLike = Omit<QuadLike, 'subject' | 'predicate' | 'object' | 'graph
 };
 type WriterBlankChild = { predicate: WriterTerm; object: WriterTerm };
 
-class SerializedTerm implements Term {
+class SerializedTerm implements BlankNodeLike {
   public readonly termType = 'BlankNode' as const;
   public constructor(public readonly value: string) {}
   public equals(other: unknown): boolean { return other === this; }

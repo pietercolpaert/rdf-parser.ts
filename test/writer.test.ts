@@ -123,8 +123,9 @@ describe('Writer', () => {
     const writer = new Writer();
     writer.addQuad(new Quad(nn('s'), nn('p'), DataFactory.literal('hello', 'EN')));
     writer.addQuad(new Quad(nn('s'), nn('p'), DataFactory.literal('مرحبا', 'ar--rtl')));
+    writer.addQuad(new Quad(nn('s'), nn('p'), DataFactory.literal('bonjour', { language: 'FR', direction: 'ltr' })));
     writer.addQuad(new Quad(nn('s'), nn('p'), DataFactory.literal('custom', nn('dt'))));
-    await expect(endWriter(writer)).resolves.toBe('<s> <p> "hello"@en, "مرحبا"@ar--rtl, "custom"^^<dt>.\n');
+    await expect(endWriter(writer)).resolves.toBe('<s> <p> "hello"@en, "مرحبا"@ar--rtl, "bonjour"@fr--ltr, "custom"^^<dt>.\n');
   });
 
   it('serializes blank-node property lists and RDF lists', async () => {

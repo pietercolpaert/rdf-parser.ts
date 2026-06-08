@@ -1,11 +1,8 @@
 import { Transform, TransformOptions, Readable, TransformCallback } from 'node:stream';
+import * as RDFJS from '@rdfjs/types';
 
-type TermType = 'NamedNode' | 'BlankNode' | 'Literal' | 'Variable' | 'DefaultGraph' | 'Quad';
-interface Term {
-    termType: TermType;
-    value: string;
-    equals(other: unknown): boolean;
-}
+type TermType = RDFJS.Term['termType'];
+type Term = RDFJS.Term;
 interface ParserOptions {
     baseIRI?: string;
     baseIRIPath?: string;
@@ -38,37 +35,18 @@ type WriterEndCallback = (error?: Error | null, output?: string) => void;
 interface DataFactoryLike {
     namedNode(value: string): NamedNodeLike;
     blankNode(value?: string): BlankNodeLike;
-    literal(value: string, languageOrDatatype?: string | NamedNodeLike, datatype?: NamedNodeLike): LiteralLike;
+    literal(value: string, languageOrDatatype?: string | NamedNodeLike | RDFJS.DirectionalLanguage, datatype?: NamedNodeLike): LiteralLike;
     variable?(value: string): VariableLike;
     defaultGraph(): DefaultGraphLike;
     quad(subject: TermLike, predicate: TermLike, object: TermLike, graph?: TermLike): QuadLike;
 }
-type TermLike = NamedNodeLike | BlankNodeLike | LiteralLike | VariableLike | DefaultGraphLike | QuadLike;
-type NamedNodeLike = Term & {
-    termType: 'NamedNode';
-};
-type BlankNodeLike = Term & {
-    termType: 'BlankNode';
-};
-type VariableLike = Term & {
-    termType: 'Variable';
-};
-type DefaultGraphLike = Term & {
-    termType: 'DefaultGraph';
-};
-type LiteralLike = Term & {
-    termType: 'Literal';
-    language: string;
-    datatype: NamedNodeLike;
-    direction?: string;
-};
-type QuadLike = Term & {
-    termType: 'Quad';
-    subject: TermLike;
-    predicate: TermLike;
-    object: TermLike;
-    graph: TermLike;
-};
+type TermLike = RDFJS.Term;
+type NamedNodeLike = RDFJS.NamedNode;
+type BlankNodeLike = RDFJS.BlankNode;
+type VariableLike = RDFJS.Variable;
+type DefaultGraphLike = RDFJS.DefaultGraph;
+type LiteralLike = RDFJS.Literal;
+type QuadLike = RDFJS.BaseQuad;
 interface MessageQuad {
     quad: QuadLike;
     messageCounter: number;
@@ -83,6 +61,7 @@ type ParserEventCallbacks = {
     prefix?: (prefix: string, iri: NamedNodeLike) => void;
     comment?: (comment: string) => void;
 };
+type LiteralDirection = RDFJS.DirectionalLanguage['direction'];
 declare class NamedNode implements NamedNodeLike {
     readonly value: string;
     readonly termType: "NamedNode";
@@ -111,8 +90,8 @@ declare class Literal implements LiteralLike {
     readonly language: string;
     readonly datatype: NamedNodeLike;
     readonly termType: "Literal";
-    readonly direction?: string;
-    constructor(value: string, language?: string, datatype?: NamedNodeLike, direction?: string);
+    readonly direction?: LiteralDirection;
+    constructor(value: string, language?: string, datatype?: NamedNodeLike, direction?: LiteralDirection);
     equals(other: unknown): boolean;
 }
 declare class Quad implements QuadLike {
@@ -137,7 +116,7 @@ type WriterBlankChild = {
     predicate: WriterTerm;
     object: WriterTerm;
 };
-declare class SerializedTerm implements Term {
+declare class SerializedTerm implements BlankNodeLike {
     readonly value: string;
     readonly termType: "BlankNode";
     constructor(value: string);
@@ -241,7 +220,7 @@ declare function isMessageQuad(value: unknown): value is MessageQuad;
 declare function toMessages(output: Iterable<ParserOutputItem>, messageCount?: number): Message[];
 declare const namedNode: (value: string) => NamedNodeLike;
 declare const blankNode: (value?: string) => BlankNodeLike;
-declare const literal: (value: string, languageOrDatatype?: string | NamedNodeLike, datatype?: NamedNodeLike) => LiteralLike;
+declare const literal: (value: string, languageOrDatatype?: string | NamedNodeLike | RDFJS.DirectionalLanguage, datatype?: NamedNodeLike) => LiteralLike;
 declare const variable: ((value: string) => VariableLike) | undefined;
 declare const defaultGraph: () => DefaultGraphLike;
 declare const quad: (subject: TermLike, predicate: TermLike, object: TermLike, graph?: TermLike) => QuadLike;

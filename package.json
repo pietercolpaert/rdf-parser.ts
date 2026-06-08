@@ -94,6 +94,7 @@
     "perf:graphy": "npm run build && node perf/bench.js --no-triple-terms"
   },
   "dependencies": {
+    "@rdfjs/types": "^2.0.1",
     "abort-controller": "^3.0.0",
     "acorn": "^8.16.0",
     "ansi-styles": "^4.3.0",
@@ -233,7 +234,6 @@
   },
   "devDependencies": {
     "@graphy/content.nq.read": "^4.3.7",
-    "@rdfjs/types": "^2.0.1",
     "@types/node": "^24.0.0",
     "arrayify-stream": "^3.0.0",
     "n3": "^2.0.1",
@@ -241,7 +241,7 @@
     "streamify-string": "^1.0.1",
     "tsup": "^8.5.0",
     "typescript": "^5.8.3",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.8"
   },
   "engines": {
     "node": ">=24.0.0"

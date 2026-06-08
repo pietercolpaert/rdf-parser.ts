@@ -22,6 +22,9 @@ function sameTerm(a, b) {
   }
   return true;
 }
+function isDirectionalLanguage(value) {
+  return Boolean(value && typeof value === "object" && "language" in value && !("termType" in value));
+}
 function scanCommentEnd(input, index) {
   for (let i = index + 1; i < input.length; i++) {
     const code = input.charCodeAt(i);
@@ -256,6 +259,14 @@ var init_index = __esm({
           }
           const language = languageOrDatatype.toLowerCase();
           return new Literal(value, language, datatype ?? new NamedNode(language ? RDF_LANG_STRING : XSD_STRING));
+        }
+        if (isDirectionalLanguage(languageOrDatatype)) {
+          return new Literal(
+            value,
+            languageOrDatatype.language.toLowerCase(),
+            datatype ?? new NamedNode(RDF_LANG_STRING),
+            languageOrDatatype.direction
+          );
         }
         return new Literal(value, "", languageOrDatatype ?? datatype ?? new NamedNode(XSD_STRING));
       },
