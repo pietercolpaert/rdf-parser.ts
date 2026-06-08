@@ -191,7 +191,7 @@
   <main>
     <header>
       <h1>rdf-parser-ts browser demo</h1>
-      <p class="lead">Parse RDF from a URL or pasted text, auto-detect the input format, serialize it again in the selected output format, and watch throughput while the browser processes the input.</p>
+        <p class="lead">Parse RDF from a URL or pasted text, auto-detect the input format, optionally serialize it again in the selected output format, and watch throughput while the browser processes the input.</p>
     </header>
 
     <div class="grid">
@@ -224,13 +224,19 @@ ex:m2 ex:p ex:o2 .</textarea>
           <option value="N-Quads" selected>N-Quads</option>
         </select>
 
+        <label class="checkbox" for="serialize-output">
+          <input id="serialize-output" name="serializeOutput" type="checkbox">
+          Write the parsed data out again
+        </label>
+        <p class="hint">Off by default. Enable this only when you want serialized output in the selected format.</p>
+
         <label class="checkbox" for="relax">
           <input id="relax" name="relax" type="checkbox">
           Enable relaxed parser mode
         </label>
         <p class="hint">Relaxed mode passes <code>relax: true</code> to the parser for more permissive parsing.</p>
 
-        <button id="run" type="submit">Parse and serialize</button>
+        <button id="run" type="submit">Parse</button>
         <button id="stop" class="secondary" type="button" disabled>Stop</button>
         <button id="copy" class="secondary" type="button" disabled>Copy output</button>
         <p id="status" class="status" aria-live="polite">Ready.</p>
@@ -271,6 +277,7 @@ ex:m2 ex:p ex:o2 .</textarea>
     const urlInput = document.querySelector('#url');
     const textInput = document.querySelector('#text');
     const outputFormat = document.querySelector('#output-format');
+    const serializeOutputInput = document.querySelector('#serialize-output');
     const relaxInput = document.querySelector('#relax');
     const runButton = document.querySelector('#run');
     const stopButton = document.querySelector('#stop');
@@ -348,9 +355,12 @@ ex:m2 ex:p ex:o2 .</textarea>
       let detected;
       let sourceMode = getSourceMode();
       let sourceUrl = '';
+      const shouldSerialize = serializeOutputInput.checked;
       let writer;
       let liveOutput;
       let writerOptions;
+
+      if (!shouldSerialize) output.textContent = 'Serialization disabled. Enable “Write the parsed data out again” to produce serialized output.';
 
       try {
         if (sourceMode === 'url') {
@@ -363,17 +373,21 @@ ex:m2 ex:p ex:o2 .</textarea>
           detected = detectFormat({ url: response.url || sourceUrl, contentType: response.headers.get('content-type') || '' });
           metrics.detectedFormat.textContent = detected.label;
           const parserOptions = createParserOptions(detected, response.url || sourceUrl);
-          writerOptions = createWriterOptions(detected, outputFormat.value);
-          ({ writer, liveOutput } = createLiveWriter(writerOptions));
+          if (shouldSerialize) {
+            writerOptions = createWriterOptions(detected, outputFormat.value);
+            ({ writer, liveOutput } = createLiveWriter(writerOptions));
+          }
           if (response.body) {
-            status.textContent = 'Streaming, parsing, and writing output…';
+            status.textContent = shouldSerialize ? 'Streaming, parsing, and writing output…' : 'Streaming and parsing…';
             await readStream(response.body, parserOptions, start, items, writer, activeController.signal);
           } else {
             const text = await response.text();
             detected = detectFormat({ url: response.url || sourceUrl, contentType: response.headers.get('content-type') || '', text });
             metrics.detectedFormat.textContent = detected.label;
-            writerOptions = createWriterOptions(detected, outputFormat.value);
-            ({ writer, liveOutput } = createLiveWriter(writerOptions));
+            if (shouldSerialize) {
+              writerOptions = createWriterOptions(detected, outputFormat.value);
+              ({ writer, liveOutput } = createLiveWriter(writerOptions));
+            }
             parseText(text, createParserOptions(detected, response.url || sourceUrl), items, writer);
             updateMetrics(start, items);
           }
@@ -382,38 +396,49 @@ ex:m2 ex:p ex:o2 .</textarea>
           if (!text.trim()) throw new Error('Paste RDF text or switch to URL input.');
           detected = detectFormat({ text });
           metrics.detectedFormat.textContent = detected.label;
-          writerOptions = createWriterOptions(detected, outputFormat.value);
-          ({ writer, liveOutput } = createLiveWriter(writerOptions));
-          status.textContent = 'Streaming, parsing, and writing text…';
+          if (shouldSerialize) {
+            writerOptions = createWriterOptions(detected, outputFormat.value);
+            ({ writer, liveOutput } = createLiveWriter(writerOptions));
+          }
+          status.textContent = shouldSerialize ? 'Streaming, parsing, and writing text…' : 'Streaming and parsing text…';
           await nextFrame();
           const parserOptions = createParserOptions(detected, '');
           await readStream(new Blob([text]).stream(), parserOptions, start, items, writer, activeController.signal);
-          preserveTextMessageCount(text, parserOptions, items, writer);
+          if (writer) preserveTextMessageCount(text, parserOptions, items, writer);
         }
 
-        status.textContent = 'Finalizing output…';
-        await nextFrame();
-        latestOutput = writer ? await finishWriter(writer, liveOutput) : '';
-        output.textContent = latestOutput;
+        if (writer) {
+          status.textContent = 'Finalizing output…';
+          await nextFrame();
+          latestOutput = await finishWriter(writer, liveOutput);
+          output.textContent = latestOutput;
+        } else {
+          latestOutput = '';
+        }
         latestDemoCode = createDemoCode({
           sourceMode,
           sourceUrl,
           text: sourceMode === 'text' ? textInput.value : '',
           parserOptions: createParserOptions(detected, sourceMode === 'url' ? sourceUrl : ''),
           writerOptions,
+          shouldSerialize,
         });
         demoCode.textContent = latestDemoCode;
         updateMetrics(start, items);
-        copyButton.disabled = false;
+        copyButton.disabled = !latestOutput;
         copyCodeButton.disabled = false;
-        status.textContent = `${stopRequested ? 'Stopped' : 'Done'}. ${items.length.toLocaleString()} output entr${items.length === 1 ? 'y' : 'ies'} serialized. Project code is available under “Use this in your project”.`;
+        status.textContent = shouldSerialize
+          ? `${stopRequested ? 'Stopped' : 'Done'}. ${items.length.toLocaleString()} output entr${items.length === 1 ? 'y' : 'ies'} serialized. Project code is available under “Use this in your project”.`
+          : `${stopRequested ? 'Stopped' : 'Done'}. Parsed ${items.length.toLocaleString()} entr${items.length === 1 ? 'y' : 'ies'}. Serialization stayed disabled. Project code is available under “Use this in your project”.`;
       } catch (error) {
         if (stopRequested || error?.name === 'AbortError') {
           latestOutput = writer ? await finishWriter(writer, liveOutput) : latestOutput;
-          output.textContent = latestOutput;
+          if (writer) output.textContent = latestOutput;
           updateMetrics(start, items);
           if (latestOutput) copyButton.disabled = false;
-          status.textContent = `Stopped. ${items.length.toLocaleString()} output entr${items.length === 1 ? 'y' : 'ies'} serialized.`;
+          status.textContent = writer
+            ? `Stopped. ${items.length.toLocaleString()} output entr${items.length === 1 ? 'y' : 'ies'} serialized.`
+            : `Stopped. Parsed ${items.length.toLocaleString()} entr${items.length === 1 ? 'y' : 'ies'}.`;
         } else {
           status.textContent = error instanceof Error ? error.message : String(error);
         }
@@ -441,6 +466,7 @@ ex:m2 ex:p ex:o2 .</textarea>
       params.set('url', urlInput.value);
       params.set('text', textInput.value);
       params.set('output', outputFormat.value);
+      params.set('serialize', serializeOutputInput.checked ? '1' : '0');
       params.set('relax', relaxInput.checked ? '1' : '0');
       const nextUrl = `${window.location.pathname}${window.location.search}#${params.toString()}`;
       window.history.replaceState(null, '', nextUrl);
@@ -461,6 +487,7 @@ ex:m2 ex:p ex:o2 .</textarea>
         if (params.has('output') && [...outputFormat.options].some(option => option.value === params.get('output'))) {
           outputFormat.value = params.get('output') ?? outputFormat.value;
         }
+        if (params.has('serialize')) serializeOutputInput.checked = /^(?:1|true|yes|on)$/i.test(params.get('serialize') ?? '');
         if (params.has('relax')) relaxInput.checked = /^(?:1|true|yes|on)$/i.test(params.get('relax') ?? '');
       } finally {
         restoringFormState = false;
@@ -615,6 +642,7 @@ ex:m2 ex:p ex:o2 .</textarea>
     }
 
     function writeItem(writer, item) {
+      if (!writer) return;
       let writeError;
       writer.addQuad(item, error => {
         if (error) writeError = error;
@@ -635,6 +663,7 @@ ex:m2 ex:p ex:o2 .</textarea>
 
     function preserveExpectedMessageCount(expectedMessageCount, items, writer) {
       items.messageCount = Math.max(items.messageCount || 0, expectedMessageCount);
+      if (!writer) return;
       for (let index = countMessageCounters(items); index < expectedMessageCount; index++) writer.addMessage([]);
     }
 
@@ -650,12 +679,26 @@ ex:m2 ex:p ex:o2 .</textarea>
       });
     }
 
-    function createDemoCode({ sourceMode, sourceUrl, text, parserOptions, writerOptions }) {
+    function createDemoCode({ sourceMode, sourceUrl, text, parserOptions, writerOptions, shouldSerialize }) {
       const parserOptionsSource = JSON.stringify(parserOptions, null, 2);
-      const writerOptionsSource = JSON.stringify(writerOptions, null, 2);
       const sourceSetup = sourceMode === 'url'
         ? `const response = await fetch(${JSON.stringify(sourceUrl)});\nif (!response.body) throw new Error('This browser does not expose a response stream.');\nconst inputStream = response.body;`
         : `const rdfText = ${JSON.stringify(text.length > 1200 ? 'Paste RDF text here.' : text)};\nconst inputStream = new Blob([rdfText]).stream();`;
+
+      if (!shouldSerialize) {
+        return `import { StreamParser } from 'https://cdn.jsdelivr.net/npm/rdf-parser-ts/dist/browser/index.mjs';
+
+const parserOptions = ${parserOptionsSource};
+${sourceSetup}
+
+const parser = new StreamParser(parserOptions);
+
+for await (const item of inputStream.pipeThrough(parser)) {
+  console.log(item);
+}`;
+      }
+
+      const writerOptionsSource = JSON.stringify(writerOptions, null, 2);
 
       return `import { StreamParser, Writer } from 'https://cdn.jsdelivr.net/npm/rdf-parser-ts/dist/browser/index.mjs';
 
