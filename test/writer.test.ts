@@ -148,7 +148,7 @@ describe('Writer', () => {
     await expect(endWriter(writer)).resolves.toBe('(<a> <b>) <p> <o>.\n_:other <p> <o>.\n');
   });
 
-  it('serializes RDF-star quoted triples and quads', () => {
+  it('serializes RDF1.2 triple terms', () => {
     const writer = new Writer();
     expect(writer.quadToString(new Quad(nn('a'), nn('b'), nn('c')), nn('p'), new Quad(nn('s'), nn('p'), nn('o'), nn('g'))))
       .toBe('<<(<a> <b> <c>)>> <p> <<(<s> <p> <o> <g>)>> .\n');

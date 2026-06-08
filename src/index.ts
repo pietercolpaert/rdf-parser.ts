@@ -95,6 +95,7 @@ type CoreParserState = {
 const XSD = 'http://www.w3.org/2001/XMLSchema#';
 const RDF = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#';
 const RDF_TYPE = `${RDF}type`;
+const RDF_REIFIES = `${RDF}reifies`;
 const RDF_FIRST = `${RDF}first`;
 const RDF_REST = `${RDF}rest`;
 const RDF_NIL = `${RDF}nil`;
@@ -1032,7 +1033,6 @@ class CoreParser {
   private readonly callbacks: ParserEventCallbacks;
   private readonly strictNTriples: boolean;
   private readonly strictNQuads: boolean;
-  private readonly allowLegacyTripleTerms: boolean;
   private readonly allowDotlessGraphTerminator: boolean;
   private readonly relax: boolean;
   private readonly defaultGraphTerm: DefaultGraphLike;
@@ -1068,7 +1068,6 @@ class CoreParser {
     const format = (options.format ?? '').toLowerCase();
     this.strictNTriples = format.includes('n-triples');
     this.strictNQuads = format.includes('n-quads');
-    this.allowLegacyTripleTerms = format.includes('*');
     this.allowDotlessGraphTerminator = format === '' || format.includes('trig');
   }
 
@@ -1426,7 +1425,7 @@ class CoreParser {
   private parseSubject(graph: TermLike): TermLike {
     const term = this.parseTerm(graph);
     if (term.termType === 'Literal' || term.termType === 'DefaultGraph' || term.termType === 'Variable' ||
-      ((this.strictNTriples || this.strictNQuads) && !this.allowLegacyTripleTerms && term.termType === 'Quad')) {
+      ((this.strictNTriples || this.strictNQuads) && term.termType === 'Quad')) {
       this.fail(`Invalid subject term ${term.termType}`);
     }
     return term;
@@ -1490,7 +1489,7 @@ class CoreParser {
     if (code < 0) this.fail('Unexpected end of input');
 
     if (code === 60) {
-      if (this.input.charCodeAt(this.index + 1) === 60) return this.parseTripleTerm(graph);
+      if (this.input.charCodeAt(this.index + 1) === 60) return this.parseDoubleAngleTerm(graph);
       return this.parseIri();
     }
     if (code === 34 || code === 39) return this.parseLiteral();
@@ -1506,25 +1505,77 @@ class CoreParser {
     return this.parsePrefixedName();
   }
 
-  private parseTripleTerm(graph: TermLike): TermLike {
+  private parseDoubleAngleTerm(graph: TermLike): TermLike {
     this.index += 2;
     this.skipWsAndComments();
-    const parenthesized = this.peekCharCode() === 40;
-    if (parenthesized) this.index++;
-    else if ((this.strictNTriples || this.strictNQuads) && !this.allowLegacyTripleTerms) {
-      this.fail('Unparenthesized triple terms are not allowed in RDF1.2 line formats');
-    }
+    if (this.peekCharCode() === 40) return this.parseTripleTerm(graph);
+    if (this.strictNTriples || this.strictNQuads) this.fail('Reified triples are not allowed in this format');
+    return this.parseReifiedTriple(graph);
+  }
+
+  private parseTripleTerm(graph: TermLike): TermLike {
+    this.expectChar(40, 'Expected ( after << in RDF1.2 triple term');
     const subject = this.parseSubject(graph);
     const predicate = this.parsePredicate(graph);
     const object = this.parseObject(graph);
     this.skipWsAndComments();
-    if (parenthesized) this.expectChar(41, 'Expected ) after triple term');
+    this.expectChar(41, 'Expected ) after triple term');
     this.skipWsAndComments();
     if (this.input.charCodeAt(this.index) !== 62 || this.input.charCodeAt(this.index + 1) !== 62) {
       this.fail('Expected >> after triple term');
     }
     this.index += 2;
     return this.factory.quad(subject, predicate, object, this.factory.defaultGraph());
+  }
+
+  private parseReifiedTriple(graph: TermLike): TermLike {
+    const subject = this.parseReifiedTripleSubject(graph);
+    const predicate = this.parsePredicate(graph);
+    const object = this.parseReifiedTripleObject(graph);
+    this.skipWsAndComments();
+    const reifier = this.peekCharCode() === 126 ? this.parseReifier(graph) : this.createFreshBlankNode();
+    this.skipWsAndComments();
+    if (this.input.charCodeAt(this.index) !== 62 || this.input.charCodeAt(this.index + 1) !== 62) {
+      this.fail('Expected >> after reified triple');
+    }
+    this.index += 2;
+    const tripleTerm = this.factory.quad(subject, predicate, object, this.factory.defaultGraph());
+    this.addQuad(reifier, this.factory.namedNode(RDF_REIFIES), tripleTerm, graph);
+    return reifier;
+  }
+
+  private parseReifiedTripleSubject(graph: TermLike): TermLike {
+    const start = this.index;
+    const term = this.parseTerm(graph);
+    this.assertReifiedTripleTerm(term, start, 'subject');
+    if (term.termType === 'Literal' || term.termType === 'Quad') this.fail(`Invalid reified triple subject term ${term.termType}`);
+    return term;
+  }
+
+  private parseReifiedTripleObject(graph: TermLike): TermLike {
+    const start = this.index;
+    const term = this.parseTerm(graph);
+    this.assertReifiedTripleTerm(term, start, 'object');
+    return term;
+  }
+
+  private parseReifier(graph: TermLike): TermLike {
+    this.index++;
+    this.skipWsAndComments();
+    if (this.input.charCodeAt(this.index) === 62 && this.input.charCodeAt(this.index + 1) === 62) return this.createFreshBlankNode();
+    const start = this.index;
+    const term = this.parseTerm(graph);
+    this.assertReifiedTripleTerm(term, start, 'reifier');
+    if (term.termType !== 'NamedNode' && term.termType !== 'BlankNode') this.fail(`Invalid reifier term ${term.termType}`);
+    return term;
+  }
+
+  private assertReifiedTripleTerm(term: TermLike, start: number, position: string, end = this.index): void {
+    if (term.termType === 'DefaultGraph' || term.termType === 'Variable') this.fail(`Invalid reified triple ${position} term ${term.termType}`);
+    const code = this.input.charCodeAt(start);
+    if (code === 40 || (code === 91 && !this.isAnonymousBlankNodeLabel(start, end))) {
+      this.fail(`Invalid reified triple ${position} term ${term.termType}`);
+    }
   }
 
   private parseIri(): NamedNodeLike {
@@ -1644,6 +1695,10 @@ class CoreParser {
 
   private createBlankNode(label: string): BlankNodeLike {
     return this.messagesEnabled ? this.factory.blankNode(`m${this.messageCounter}_${label}`) : this.factory.blankNode(label);
+  }
+
+  private createFreshBlankNode(): BlankNodeLike {
+    return this.createBlankNode(`b${this.localBlankNodeCounter++}`);
   }
 
   private finishMessage(): void {
@@ -1927,7 +1982,7 @@ export function termToString(term: TermLike): string {
       return `${quoted}^^<${term.datatype.value}>`;
     }
     case 'Quad':
-      return `<< ${termToString(term.subject)} ${termToString(term.predicate)} ${termToString(term.object)} >>`;
+      return `<<(${termToString(term.subject)} ${termToString(term.predicate)} ${termToString(term.object)})>>`;
   }
 }
 

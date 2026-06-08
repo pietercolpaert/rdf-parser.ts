@@ -59,12 +59,12 @@ function generateSyntheticNQuads(count, options = {}) {
         break;
       case 6:
         lines[i] = includeTripleTerms
-          ? `<< ${s} ${p} ${iri(`o${i}`)} >> ${iri('assertedBy')} "source ${i}" ${g} .`
+          ? `<<(${s} ${p} ${iri(`o${i}`)})>> ${iri('assertedBy')} "source ${i}" ${g} .`
           : `${s} ${iri('assertedBy')} "source ${i}" ${g} .`;
         break;
       default:
         lines[i] = includeTripleTerms
-          ? `${s} ${p} << ${iri(`nested${i}`)} ${iri('knows')} "friend ${i}" >> ${g} .`
+          ? `${s} ${p} <<(${iri(`nested${i}`)} ${iri('knows')} "friend ${i}")>> ${g} .`
           : `${s} ${p} "friend ${i}" ${g} .`;
         break;
     }
@@ -102,7 +102,7 @@ function printResult(size, result) {
 }
 
 function parseWithN3(input) {
-  const parser = new N3Parser({ format: 'N-Quads*' });
+  const parser = new N3Parser({ format: 'N-Quads' });
   return parser.parse(input).length;
 }
 
@@ -142,8 +142,8 @@ async function main() {
     const input = generateSyntheticNQuads(size, { includeTripleTerms: args.includeTripleTerms });
     // Warm up both parser implementations on a small prefix of the generated data.
     const warmupInput = input.split('\n').slice(0, Math.min(1000, size)).join('\n');
-    new Parser({ format: 'N-Quads*' }).parse(warmupInput);
-    new Parser({ format: 'N-Quads*', relax: true }).parse(warmupInput);
+    new Parser({ format: 'N-Quads' }).parse(warmupInput);
+    new Parser({ format: 'N-Quads', relax: true }).parse(warmupInput);
     if (args.includeN3) {
       try { parseWithN3(warmupInput); } catch { /* Older N3 versions may reject RDF1.2 triple terms. */ }
     }
@@ -151,10 +151,10 @@ async function main() {
       try { await parseWithGraphy(warmupInput, true); } catch { /* Graphy may reject generated input if unsupported. */ }
     }
 
-    const own = await bench('rdf-parser-ts', input, () => (new Parser({ format: 'N-Quads*' }).parse(input) || []).length);
+    const own = await bench('rdf-parser-ts', input, () => (new Parser({ format: 'N-Quads' }).parse(input) || []).length);
     printResult(size, own);
 
-    const ownRelax = await bench('rdf-parser-ts/relax', input, () => (new Parser({ format: 'N-Quads*', relax: true }).parse(input) || []).length);
+    const ownRelax = await bench('rdf-parser-ts/relax', input, () => (new Parser({ format: 'N-Quads', relax: true }).parse(input) || []).length);
     printResult(size, ownRelax);
 
     if (args.includeN3) {

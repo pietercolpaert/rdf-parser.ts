@@ -75,6 +75,19 @@ describe('Parser', () => {
     expect(term.termType).toBe('Literal');
     expect(termToString(term)).toBe('"hello"@en');
   });
+
+  it('parses RDF1.2 triple terms and Turtle reified triples', () => {
+    expect(ids('<<( <s> <p> <o> )>> <p2> <<( <s2> <p2> <o2> )>> .')).toEqual([
+      '<<(<http://example.org/s> <http://example.org/p> <http://example.org/o>)>> <http://example.org/p2> <<(<http://example.org/s2> <http://example.org/p2> <http://example.org/o2>)>> .',
+    ]);
+    expect(ids('<< <s> <p> <o> >> <p2> <o2> .')).toEqual([
+      '_:b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies> <<(<http://example.org/s> <http://example.org/p> <http://example.org/o>)>> .',
+      '_:b0 <http://example.org/p2> <http://example.org/o2> .',
+    ]);
+    expect(() => new Parser({ format: 'N-Quads' }).parse(
+      '<< <http://example.org/s> <http://example.org/p> <http://example.org/o> >> <http://example.org/p2> <http://example.org/o2> .',
+    )).toThrow(/Reified triples are not allowed/);
+  });
 });
 
 describe('StreamParser', () => {

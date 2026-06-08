@@ -209,7 +209,7 @@ writer.end((error, output) => {
 });
 ```
 
-`Writer` also supports blank-node property-list helpers through `blank()`, RDF list helpers through `list()`, RDF-star quoted triples/quads, base IRI shortening, datatype/language literal serialization, and output streams. On Node.js, `StreamWriter` is a `Transform` stream in object mode for serializing quad streams to text.
+`Writer` also supports blank-node property-list helpers through `blank()`, RDF list helpers through `list()`, RDF 1.2 triple terms, base IRI shortening, datatype/language literal serialization, and output streams. The parser accepts RDF 1.2 triple terms (`<<(...)>>`) and Turtle/TriG reified triples (`<<...>>`) with RDF 1.2 `rdf:reifies` semantics. On Node.js, `StreamWriter` is a `Transform` stream in object mode for serializing quad streams to text.
 
 `Writer` can also serialize RDF Message Logs. In line formats such as N-Quads, it writes `VERSION "1.2-messages"` and `MESSAGE` delimiters. In Turtle/TriG-style output, it writes `@version "1.2-messages" .` and `@message .` delimiters.
 
@@ -331,7 +331,7 @@ import { StreamParser } from 'rdf-parser-ts';
 
 const parser = new StreamParser({
   baseIRI: 'http://example.org/',
-  format: 'application/n-quads*',
+  format: 'application/n-quads',
 });
 
 createReadStream('data.nq')
@@ -406,7 +406,7 @@ import { StreamParser } from 'rdf-parser-ts';
 const parser = new StreamParser({
   factory: dataFactory,
   baseIRI: action.metadata?.baseIRI,
-  format: mediaType.endsWith('n3') ? mediaType : `${mediaType}*`,
+  format: mediaType,
   parseUnsupportedVersions: true,
   version: action.metadata?.version,
 });
@@ -425,7 +425,7 @@ cat data.nq | rdf-parser-ts --format application/n-quads
 
 Options:
 
-- `--format`, `-f`: format hint, such as `text/turtle`, `application/n-quads`, or `application/n-quads*`.
+- `--format`, `-f`: format hint, such as `text/turtle` or `application/n-quads`.
 - `--base`, `-b`: base IRI for relative IRIs.
 - `--help`, `-h`: print usage.
 
