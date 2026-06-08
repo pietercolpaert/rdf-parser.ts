@@ -215,6 +215,30 @@ MESSAGE`);
       [],
     ]);
   });
+
+  it(`preserves trailing empty messages after a reified triple — ${url('empty-message-between-non-empty-messages')}`, () => {
+    const messages = parseMessages(`@version "1.2-messages" .
+@prefix ex: <http://example.org/>.
+ex:m1 ex:p ex:o1 .
+@message .
+ex:m2 ex:p ex:o2 .
+MESSAGE
+MESSAGE
+ex:m3 ex:p << ex:s1 ex:p ex:o3 >> .
+MESSAGE
+MESSAGE`);
+
+    expect(messageIds(messages)).toEqual([
+      ['<http://example.org/m1> <http://example.org/p> <http://example.org/o1> .'],
+      ['<http://example.org/m2> <http://example.org/p> <http://example.org/o2> .'],
+      [],
+      [
+        '_:m3_b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies> <<(<http://example.org/s1> <http://example.org/p> <http://example.org/o3>)>> .',
+        '<http://example.org/m3> <http://example.org/p> _:m3_b0 .',
+      ],
+      [],
+    ]);
+  });
 });
 
 describe('RDF Messages spec serialization tests', () => {

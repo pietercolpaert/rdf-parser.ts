@@ -404,7 +404,7 @@ ex:m2 ex:p ex:o2 .</textarea>
           await nextFrame();
           const parserOptions = createParserOptions(detected, '');
           await readStream(new Blob([text]).stream(), parserOptions, start, items, writer, activeController.signal);
-          if (writer) preserveTextMessageCount(text, parserOptions, items, writer);
+          preserveTextMessageCount(text, parserOptions, items, writer);
         }
 
         if (writer) {
