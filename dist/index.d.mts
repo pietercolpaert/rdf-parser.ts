@@ -138,6 +138,7 @@ declare class Writer {
     private messagesStarted;
     private currentMessageCounter;
     private hasWrittenMessage;
+    private trailingEmptyMessageCount;
     constructor(options?: WriterOptions);
     constructor(outputStream: WriterOutputStream, options?: WriterOptions);
     quadToString(subject: WriterTerm, predicate: WriterTerm, object: WriterTerm, graph?: WriterTerm): string;

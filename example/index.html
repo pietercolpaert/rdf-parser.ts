@@ -377,7 +377,9 @@ ex:m2 ex:p ex:o2 .</textarea>
           ({ writer, liveOutput } = createLiveWriter(writerOptions));
           status.textContent = 'Streaming, parsing, and writing text…';
           await nextFrame();
-          await readStream(new Blob([text]).stream(), createParserOptions(detected, ''), start, items, writer, activeController.signal);
+          const parserOptions = createParserOptions(detected, '');
+          await readStream(new Blob([text]).stream(), parserOptions, start, items, writer, activeController.signal);
+          preserveTextMessageCount(text, parserOptions, items, writer);
         }
 
         status.textContent = 'Finalizing output…';
@@ -462,8 +464,8 @@ ex:m2 ex:p ex:o2 .</textarea>
       if (lowerUrl.endsWith('.nt')) return { format: 'N-Triples', label: rdfMessages ? 'N-Triples RDF Messages' : 'N-Triples' };
       if (lowerUrl.endsWith('.trig')) return { format: 'TriG', label: rdfMessages ? 'TriG RDF Messages' : 'TriG' };
       if (lowerUrl.endsWith('.ttl') || lowerUrl.endsWith('.n3')) return { format: undefined, label: rdfMessages ? 'Turtle/TriG RDF Messages' : 'Turtle/TriG' };
-      if (/^(?:VERSION|MESSAGE)\b/m.test(sample)) return { format: 'N-Quads', label: 'RDF Messages line format', rdfMessages: true };
       if (/^@(?:prefix|base|version|message)\b/im.test(sample)) return { format: undefined, label: rdfMessages ? 'Turtle/TriG RDF Messages' : 'Turtle/TriG' };
+      if (/^(?:VERSION|MESSAGE)\b/m.test(sample)) return { format: undefined, label: 'RDF Messages', rdfMessages: true };
       if (/^[^#\n]*<[^>]+>\s+<[^>]+>\s+/.test(sample)) return { format: undefined, label: rdfMessages ? 'line RDF Messages' : 'line RDF' };
       return undefined;
     }
@@ -534,6 +536,7 @@ ex:m2 ex:p ex:o2 .</textarea>
       const parsed = parser.parse(text) || [];
       items.push(...parsed);
       for (const item of parsed) writeItem(writer, item);
+      preserveParsedMessageCount(parsed, items, writer);
     }
 
     async function readStream(body, parserOptions, start, items, writer, signal) {
@@ -569,6 +572,22 @@ ex:m2 ex:p ex:o2 .</textarea>
         if (error) writeError = error;
       });
       if (writeError) throw writeError;
+    }
+
+    function preserveTextMessageCount(text, parserOptions, items, writer) {
+      if (!parserOptions.rdfMessages && !isMessagesVersion(parserOptions.version)) return;
+      const messages = new Parser(parserOptions).parseMessages(text);
+      preserveExpectedMessageCount(messages.length, items, writer);
+    }
+
+    function preserveParsedMessageCount(parsed, items, writer) {
+      if (!Array.isArray(parsed) || typeof parsed.messageCount !== 'number') return;
+      preserveExpectedMessageCount(parsed.messageCount, items, writer);
+    }
+
+    function preserveExpectedMessageCount(expectedMessageCount, items, writer) {
+      items.messageCount = Math.max(items.messageCount || 0, expectedMessageCount);
+      for (let index = countMessageCounters(items); index < expectedMessageCount; index++) writer.addMessage([]);
     }
 
     async function finishWriter(writer, liveOutput) {
@@ -637,6 +656,10 @@ console.log(serialized);`;
     }
 
     function countMessages(items) {
+      return Math.max(countMessageCounters(items), items.messageCount || 0);
+    }
+
+    function countMessageCounters(items) {
       let highestMessageCounter = -1;
       for (const item of items) {
         if (isMessageQuad(item)) highestMessageCounter = Math.max(highestMessageCounter, item.messageCounter);

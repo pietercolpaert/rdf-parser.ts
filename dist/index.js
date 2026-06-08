@@ -215,6 +215,7 @@ var Writer = class {
   messagesStarted = false;
   currentMessageCounter = 0;
   hasWrittenMessage = false;
+  trailingEmptyMessageCount = 0;
   constructor(outputStreamOrOptions, maybeOptions) {
     let outputStream;
     let options;
@@ -291,7 +292,10 @@ var Writer = class {
       }
       if (this.messagesEnabled) this.ensureMessagesStarted();
       this.writeQuadTerms(subject, predicate, quadObject, graph, callback);
-      if (this.messagesEnabled) this.hasWrittenMessage = true;
+      if (this.messagesEnabled) {
+        this.hasWrittenMessage = true;
+        this.trailingEmptyMessageCount = 0;
+      }
     } catch (error) {
       const callback = typeof predicateOrDone === "function" ? predicateOrDone : typeof graphOrDone === "function" ? graphOrDone : done;
       callback?.(error instanceof Error ? error : new Error(String(error)));
@@ -305,7 +309,12 @@ var Writer = class {
       this.assertOpen();
       this.ensureMessagesStarted();
       if (this.hasWrittenMessage) this.writeMessageDelimiter();
-      for (const quad2 of message) this.writeQuadTerms(quad2.subject, quad2.predicate, quad2.object, quad2.graph);
+      let wroteQuad = false;
+      for (const quad2 of message) {
+        wroteQuad = true;
+        this.writeQuadTerms(quad2.subject, quad2.predicate, quad2.object, quad2.graph);
+      }
+      this.trailingEmptyMessageCount = wroteQuad ? 0 : this.trailingEmptyMessageCount + 1;
       this.hasWrittenMessage = true;
       done?.(null);
     } catch (error) {
@@ -368,6 +377,10 @@ var Writer = class {
   end(done) {
     try {
       if (!this.closed && this.subject !== null) this.closeCurrentStatement();
+      if (!this.closed && this.messagesStarted && this.trailingEmptyMessageCount > 0) {
+        this.writeMessageDelimiter();
+        this.trailingEmptyMessageCount = 0;
+      }
       this.closed = true;
       if (!this.endStream) {
         done?.(null);
@@ -427,6 +440,7 @@ var Writer = class {
     while (this.currentMessageCounter < entry.messageCounter) this.writeMessageDelimiter();
     this.writeQuadTerms(entry.quad.subject, entry.quad.predicate, entry.quad.object, entry.quad.graph, done);
     this.hasWrittenMessage = true;
+    this.trailingEmptyMessageCount = 0;
   }
   ensureMessagesStarted() {
     this.messagesEnabled = true;
