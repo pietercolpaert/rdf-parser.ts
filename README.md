@@ -137,8 +137,8 @@ Current browser bundle sizes after `npm run build`:
 
 | Bundle | Raw | gzip |
 | --- | ---: | ---: |
-| `dist/browser/index.mjs` | 36,229 bytes (35.4 KiB) | 9,869 bytes (9.6 KiB) |
-| `dist/browser/index.global.js` | 36,712 bytes (35.9 KiB) | 10,058 bytes (9.8 KiB) |
+| `dist/browser/index.mjs` | 39,546 bytes (38.6 KiB) | 10,442 bytes (10.2 KiB) |
+| `dist/browser/index.global.js` | 40,029 bytes (39.1 KiB) | 10,626 bytes (10.4 KiB) |
 
 The `example/` folder contains a browser-only parser and writer demo. It accepts a URL or pasted RDF text, auto-detects the input format from URL, content type, or syntax hints, serializes the parsed data in the selected output format, and reports quads/messages per second while processing.
 
@@ -488,27 +488,27 @@ Default RDF1.2 triple-term input, from `npm run perf:quick`:
 
 | Statements | Parser | Time | Throughput | Input | RSS delta |
 | ---: | --- | ---: | ---: | ---: | ---: |
-| 1,000 | rdf-parser-ts | 0.006s | 153,986 q/s | 0.1 MiB | 2.6 MiB |
-| 1,000 | rdf-parser-ts/relax | 0.005s | 208,366 q/s | 0.1 MiB | 1.0 MiB |
-| 1,000 | N3.js | 0.015s | 85,303 q/s | 0.1 MiB | 1.9 MiB |
-| 10,000 | rdf-parser-ts | 0.026s | 387,449 q/s | 1.1 MiB | 3.1 MiB |
-| 10,000 | rdf-parser-ts/relax | 0.023s | 441,230 q/s | 1.1 MiB | 9.6 MiB |
-| 10,000 | N3.js | 0.053s | 235,256 q/s | 1.1 MiB | 10.6 MiB |
+| 1,000 | rdf-parser-ts | 0.002s | 484,703 q/s | 0.1 MiB | 2.5 MiB |
+| 1,000 | rdf-parser-ts/relax | 0.002s | 482,593 q/s | 0.1 MiB | 0.9 MiB |
+| 1,000 | N3.js | 0.005s | 221,269 q/s | 0.1 MiB | 0.9 MiB |
+| 10,000 | rdf-parser-ts | 0.018s | 542,191 q/s | 1.1 MiB | 5.6 MiB |
+| 10,000 | rdf-parser-ts/relax | 0.016s | 615,124 q/s | 1.1 MiB | 9.7 MiB |
+| 10,000 | N3.js | 0.030s | 329,060 q/s | 1.1 MiB | 3.1 MiB |
 
 Line-format input without RDF1.2 triple terms, from `node perf/bench.js --sizes 1000,10000 --no-triple-terms`:
 
 | Statements | Parser | Time | Throughput | Input | RSS delta |
 | ---: | --- | ---: | ---: | ---: | ---: |
-| 1,000 | rdf-parser-ts | 0.001s | 685,051 q/s | 0.1 MiB | 0.6 MiB |
-| 1,000 | rdf-parser-ts/relax | 0.002s | 557,549 q/s | 0.1 MiB | 0.4 MiB |
-| 1,000 | N3.js | 0.006s | 164,800 q/s | 0.1 MiB | 1.4 MiB |
-| 1,000 | Graphy | 0.003s | 363,225 q/s | 0.1 MiB | 0.8 MiB |
-| 1,000 | Graphy/relax | 0.003s | 348,318 q/s | 0.1 MiB | 1.1 MiB |
-| 10,000 | rdf-parser-ts | 0.011s | 920,554 q/s | 0.9 MiB | 0.8 MiB |
-| 10,000 | rdf-parser-ts/relax | 0.011s | 898,020 q/s | 0.9 MiB | 4.9 MiB |
-| 10,000 | N3.js | 0.035s | 284,703 q/s | 0.9 MiB | 5.3 MiB |
-| 10,000 | Graphy | 0.020s | 496,362 q/s | 0.9 MiB | 6.3 MiB |
-| 10,000 | Graphy/relax | 0.014s | 692,878 q/s | 0.9 MiB | 2.1 MiB |
+| 1,000 | rdf-parser-ts | 0.001s | 675,611 q/s | 0.1 MiB | 0.5 MiB |
+| 1,000 | rdf-parser-ts/relax | 0.001s | 838,139 q/s | 0.1 MiB | 0.4 MiB |
+| 1,000 | N3.js | 0.006s | 171,585 q/s | 0.1 MiB | 2.0 MiB |
+| 1,000 | Graphy | 0.003s | 321,516 q/s | 0.1 MiB | 2.3 MiB |
+| 1,000 | Graphy/relax | 0.001s | 970,401 q/s | 0.1 MiB | 0.4 MiB |
+| 10,000 | rdf-parser-ts | 0.010s | 1,041,481 q/s | 0.9 MiB | 0.9 MiB |
+| 10,000 | rdf-parser-ts/relax | 0.010s | 1,027,636 q/s | 0.9 MiB | 5.1 MiB |
+| 10,000 | N3.js | 0.029s | 345,220 q/s | 0.9 MiB | 3.4 MiB |
+| 10,000 | Graphy | 0.015s | 655,047 q/s | 0.9 MiB | 7.8 MiB |
+| 10,000 | Graphy/relax | 0.006s | 1,788,101 q/s | 0.9 MiB | 2.3 MiB |
 
 On these generated inputs, the strict parser is already ahead of N3.js, and `relax: true` improves the RDF1.2 triple-term case by reducing validation overhead on hot line-format paths. The no-triple-term run shows the intended fast-path shape most clearly: common escapeless N-Quads statements are parsed with direct index scanning, bounded named-node caching, and fallback only when the specialized parser cannot handle a line. Graphy remains a strong baseline for ordinary N-Quads and benefits from its own relaxed mode, but the current Graphy reader is skipped for the default RDF1.2 triple-term workload. Memory deltas in the quick run are noisy because the process is short-lived and includes JIT, parser warmup, and garbage-collection timing.
 

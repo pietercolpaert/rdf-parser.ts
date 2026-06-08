@@ -59,7 +59,7 @@ function generateSyntheticNQuads(count, options = {}) {
         break;
       case 6:
         lines[i] = includeTripleTerms
-          ? `<<(${s} ${p} ${iri(`o${i}`)})>> ${iri('assertedBy')} "source ${i}" ${g} .`
+          ? `${s} ${iri('assertedBy')} <<(${s} ${p} ${iri(`o${i}`)})>> ${g} .`
           : `${s} ${iri('assertedBy')} "source ${i}" ${g} .`;
         break;
       default:
