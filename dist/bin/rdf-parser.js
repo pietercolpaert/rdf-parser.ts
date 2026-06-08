@@ -104,11 +104,11 @@ var Quad = class {
   }
 };
 var Message = class _Message extends Array {
-  constructor(messageCounter, quads2 = []) {
+  constructor(messageCounter, quads = []) {
     super();
     this.messageCounter = messageCounter;
     Object.setPrototypeOf(this, _Message.prototype);
-    for (const quad2 of quads2) this.push(quad2);
+    for (const quad2 of quads) this.push(quad2);
   }
   messageCounter;
   static get [Symbol.species]() {
@@ -158,9 +158,9 @@ var Parser = class {
     this.options = options;
     this._factory = options.factory ?? DataFactory;
   }
-  parse(input2, callback) {
+  parse(input, callback) {
     try {
-      const core = new CoreParser(input2, this.options, {
+      const core = new CoreParser(input, this.options, {
         prefix: (prefix, iri) => void 0,
         comment: (comment) => void 0
       });
@@ -183,8 +183,8 @@ var Parser = class {
       throw error;
     }
   }
-  parseMessages(input2) {
-    const core = new CoreParser(input2, { ...this.options, rdfMessages: true }, {
+  parseMessages(input) {
+    const core = new CoreParser(input, { ...this.options, rdfMessages: true }, {
       prefix: (prefix, iri) => void 0,
       comment: (comment) => void 0
     });
@@ -192,11 +192,11 @@ var Parser = class {
     return toMessages(result.messageQuads);
   }
 };
-function scanCommentEnd(input2, index) {
-  for (let i = index + 1; i < input2.length; i++) {
-    const code = input2.charCodeAt(i);
+function scanCommentEnd(input, index) {
+  for (let i = index + 1; i < input.length; i++) {
+    const code = input.charCodeAt(i);
     if (code === 10) return i + 1;
-    if (code === 13) return input2.charCodeAt(i + 1) === 10 ? i + 2 : i + 1;
+    if (code === 13) return input.charCodeAt(i + 1) === 10 ? i + 2 : i + 1;
   }
   return -1;
 }
@@ -225,8 +225,8 @@ var CoreParser = class {
   afterMessageDelimiter = false;
   localBlankNodeCounter = 0;
   fastEnd = 0;
-  constructor(input2, options, callbacks, state) {
-    this.input = state ? input2 : input2.charCodeAt(0) === 65279 ? input2.slice(1) : input2;
+  constructor(input, options, callbacks, state) {
+    this.input = state ? input : input.charCodeAt(0) === 65279 ? input.slice(1) : input;
     this.length = this.input.length;
     this.factory = options.factory ?? DataFactory;
     this.prefixes = state?.prefixes ?? /* @__PURE__ */ Object.create(null);
@@ -1160,16 +1160,27 @@ var quad = DataFactory.quad;
 
 // src/bin/rdf-parser.ts
 function printUsage() {
-  process.stderr.write(`Usage: rdf-parser-ts [--format FORMAT] [--base IRI] [file]
+  process.stderr.write(`Usage: rdf-parser-ts [--format FORMAT] [--base IRI] [--relax] [file]
 
 Parses RDF and writes canonical N-Quads/N-Triples-style lines to stdout.
 When no file is passed, input is read from stdin.
+
+Options:
+  --format, -f FORMAT  Input format (e.g. text/turtle, application/n-quads)
+  --base, -b IRI       Base IRI for relative references
+  --relax, -r          Enable relaxed parsing (skips some validation)
+  --silent, -s         Suppress output (useful for benchmarking)
+  --help, -h           Show this help message
 `);
 }
 var args = process.argv.slice(2);
 var format;
 var baseIRI;
+var silent;
+var relax;
 var file;
+silent = false;
+relax = false;
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
   if (arg === "--help" || arg === "-h") {
@@ -1178,6 +1189,10 @@ for (let i = 0; i < args.length; i++) {
   }
   if (arg === "--format" || arg === "-f") {
     format = args[++i];
+    continue;
+  }
+  if (arg === "--silent" || arg === "-s") {
+    silent = true;
     continue;
   }
   if (arg === "--base" || arg === "-b") {
@@ -1198,11 +1213,21 @@ for (let i = 0; i < args.length; i++) {
   }
   throw new Error(`Unexpected argument: ${arg}`);
 }
-var input = file ? (0, import_node_fs.readFileSync)(file, "utf8") : (0, import_node_fs.readFileSync)(0, "utf8");
-var parser = new Parser({ format, baseIRI });
-var quads = parser.parse(input) ?? [];
-for (const item of quads) {
-  const quad2 = isMessageQuad(item) ? item.quad : item;
-  process.stdout.write(`${quadToString(quad2)}
+try {
+  const input = file ? (0, import_node_fs.readFileSync)(file, "utf8") : (0, import_node_fs.readFileSync)(0, "utf8");
+  const parser = new Parser({ format, baseIRI, relax });
+  const quads = parser.parse(input) ?? [];
+  let i = 0;
+  for (const item of quads) {
+    if (!silent) {
+      const quad2 = isMessageQuad(item) ? item.quad : item;
+      process.stdout.write(`${quadToString(quad2)}
 `);
+    }
+    i++;
+  }
+  console.error(`Parsed ${i} quads.`);
+} catch (error) {
+  console.error(`Error: ${error.message}`);
+  process.exit(1);
 }
