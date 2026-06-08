@@ -137,10 +137,10 @@ Current browser bundle sizes after `npm run build`:
 
 | Bundle | Raw | gzip |
 | --- | ---: | ---: |
-| `dist/browser/index.mjs` | 39,546 bytes (38.6 KiB) | 10,442 bytes (10.2 KiB) |
-| `dist/browser/index.global.js` | 40,029 bytes (39.1 KiB) | 10,626 bytes (10.4 KiB) |
+| `dist/browser/index.mjs` | 40,160 bytes (39.2 KiB) | 10,567 bytes (10.3 KiB) |
+| `dist/browser/index.global.js` | 40,643 bytes (39.7 KiB) | 10,747 bytes (10.5 KiB) |
 
-The `example/` folder contains a browser-only parser and writer demo. It accepts a URL or pasted RDF text, auto-detects the input format from URL, content type, or syntax hints, serializes the parsed data in the selected output format, and reports quads/messages per second while processing.
+The `example/` folder contains a browser-only parser and writer demo. It accepts a URL or pasted RDF text, auto-detects the input format from URL, content type, or syntax hints, optionally serializes the parsed data in the selected output format, and reports quads/messages per second while processing.
 
 ## Parsing strings
 
@@ -467,7 +467,7 @@ The benchmark generates synthetic RDF1.2 N-Quads-like input with a mix of:
 - string literals
 - language-tagged literals
 - integer, decimal, and boolean literals
-- triple terms as subjects and objects
+- triple terms as objects
 
 Default sizes are $10^4$, $10^5$, and $10^6$ statements.
 
@@ -488,27 +488,27 @@ Default RDF1.2 triple-term input, from `npm run perf:quick`:
 
 | Statements | Parser | Time | Throughput | Input | RSS delta |
 | ---: | --- | ---: | ---: | ---: | ---: |
-| 1,000 | rdf-parser-ts | 0.002s | 484,703 q/s | 0.1 MiB | 2.5 MiB |
-| 1,000 | rdf-parser-ts/relax | 0.002s | 482,593 q/s | 0.1 MiB | 0.9 MiB |
-| 1,000 | N3.js | 0.005s | 221,269 q/s | 0.1 MiB | 0.9 MiB |
-| 10,000 | rdf-parser-ts | 0.018s | 542,191 q/s | 1.1 MiB | 5.6 MiB |
-| 10,000 | rdf-parser-ts/relax | 0.016s | 615,124 q/s | 1.1 MiB | 9.7 MiB |
-| 10,000 | N3.js | 0.030s | 329,060 q/s | 1.1 MiB | 3.1 MiB |
+| 1,000 | rdf-parser-ts | 0.002s | 439,540 q/s | 0.1 MiB | 2.1 MiB |
+| 1,000 | rdf-parser-ts/relax | 0.001s | 782,497 q/s | 0.1 MiB | 0.4 MiB |
+| 1,000 | N3.js | 0.008s | 127,099 q/s | 0.1 MiB | 1.9 MiB |
+| 10,000 | rdf-parser-ts | 0.023s | 435,162 q/s | 1.1 MiB | 5.6 MiB |
+| 10,000 | rdf-parser-ts/relax | 0.012s | 839,620 q/s | 1.1 MiB | 5.0 MiB |
+| 10,000 | N3.js | 0.047s | 214,567 q/s | 1.1 MiB | 6.6 MiB |
 
 Line-format input without RDF1.2 triple terms, from `node perf/bench.js --sizes 1000,10000 --no-triple-terms`:
 
 | Statements | Parser | Time | Throughput | Input | RSS delta |
 | ---: | --- | ---: | ---: | ---: | ---: |
-| 1,000 | rdf-parser-ts | 0.001s | 675,611 q/s | 0.1 MiB | 0.5 MiB |
-| 1,000 | rdf-parser-ts/relax | 0.001s | 838,139 q/s | 0.1 MiB | 0.4 MiB |
-| 1,000 | N3.js | 0.006s | 171,585 q/s | 0.1 MiB | 2.0 MiB |
-| 1,000 | Graphy | 0.003s | 321,516 q/s | 0.1 MiB | 2.3 MiB |
-| 1,000 | Graphy/relax | 0.001s | 970,401 q/s | 0.1 MiB | 0.4 MiB |
-| 10,000 | rdf-parser-ts | 0.010s | 1,041,481 q/s | 0.9 MiB | 0.9 MiB |
-| 10,000 | rdf-parser-ts/relax | 0.010s | 1,027,636 q/s | 0.9 MiB | 5.1 MiB |
-| 10,000 | N3.js | 0.029s | 345,220 q/s | 0.9 MiB | 3.4 MiB |
-| 10,000 | Graphy | 0.015s | 655,047 q/s | 0.9 MiB | 7.8 MiB |
-| 10,000 | Graphy/relax | 0.006s | 1,788,101 q/s | 0.9 MiB | 2.3 MiB |
+| 1,000 | rdf-parser-ts | 0.001s | 773,045 q/s | 0.1 MiB | 0.5 MiB |
+| 1,000 | rdf-parser-ts/relax | 0.002s | 525,116 q/s | 0.1 MiB | 0.3 MiB |
+| 1,000 | N3.js | 0.006s | 166,228 q/s | 0.1 MiB | 1.9 MiB |
+| 1,000 | Graphy | 0.003s | 317,648 q/s | 0.1 MiB | 1.9 MiB |
+| 1,000 | Graphy/relax | 0.002s | 594,226 q/s | 0.1 MiB | -1.0 MiB |
+| 10,000 | rdf-parser-ts | 0.010s | 959,069 q/s | 0.9 MiB | 1.4 MiB |
+| 10,000 | rdf-parser-ts/relax | 0.010s | 982,829 q/s | 0.9 MiB | 4.7 MiB |
+| 10,000 | N3.js | 0.026s | 386,462 q/s | 0.9 MiB | 3.3 MiB |
+| 10,000 | Graphy | 0.011s | 881,601 q/s | 0.9 MiB | 7.5 MiB |
+| 10,000 | Graphy/relax | 0.005s | 1,857,713 q/s | 0.9 MiB | 2.4 MiB |
 
 On these generated inputs, the strict parser is already ahead of N3.js, and `relax: true` improves the RDF1.2 triple-term case by reducing validation overhead on hot line-format paths. The no-triple-term run shows the intended fast-path shape most clearly: common escapeless N-Quads statements are parsed with direct index scanning, bounded named-node caching, and fallback only when the specialized parser cannot handle a line. Graphy remains a strong baseline for ordinary N-Quads and benefits from its own relaxed mode, but the current Graphy reader is skipped for the default RDF1.2 triple-term workload. Memory deltas in the quick run are noisy because the process is short-lived and includes JIT, parser warmup, and garbage-collection timing.
 
@@ -528,7 +528,7 @@ The benchmark prints elapsed time, throughput, input size, and RSS delta for thi
 - It emits quads directly from parse routines.
 - For strict N-Triples/N-Quads input, it uses a Graphy-inspired fast path for common escapeless statements before falling back to the general parser.
 - The fast path caches recurring predicate, datatype, and graph named nodes in a bounded cache.
-- A `relax: true` option mirrors Graphy's relaxed mode by skipping part of the validation cost on hot line-format paths; spec tests use strict validation by default.
+- A `relax: true` option mirrors Graphy's relaxed mode by skipping part of the validation cost on hot line-format paths and by fast-parsing common RDF1.2 triple-term objects; spec tests use strict validation by default.
 - The default data model has small classes with simple `equals()` implementations.
 - `StreamParser` incrementally parses complete statement prefixes and only retains incomplete trailing input between chunks; very large single statements still need to be held until their terminating boundary arrives.
 - Runtime dependencies are avoided for the library itself; dependencies are development/test/benchmark-only.

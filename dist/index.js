@@ -995,7 +995,7 @@ var CoreParser = class {
   readFastObject(index) {
     const code = this.input.charCodeAt(index);
     if (code === 60) {
-      if (this.input.charCodeAt(index + 1) === 60) return null;
+      if (this.input.charCodeAt(index + 1) === 60) return this.relax ? this.readFastTripleTerm(index) : null;
       const end = this.readFastIriEnd(index);
       if (end < 0) return null;
       this.fastEnd = end + 1;
@@ -1004,6 +1004,25 @@ var CoreParser = class {
     if (code === 95 && this.input.charCodeAt(index + 1) === 58) return this.readFastBlankNode(index);
     if (code === 34) return this.readFastLiteral(index);
     return null;
+  }
+  readFastTripleTerm(index) {
+    let i = index + 2;
+    i = this.skipHws(i);
+    if (this.input.charCodeAt(i) !== 40) return null;
+    i = this.skipHws(i + 1);
+    const subject = this.readFastNode(i, false);
+    if (!subject || subject.termType === "Quad") return null;
+    i = this.skipHws(this.fastEnd);
+    const predicateEnd = this.readFastIriEnd(i);
+    if (predicateEnd < 0) return null;
+    const predicate = this.cachedNamedNode(this.input.slice(i + 1, predicateEnd));
+    i = this.skipHws(predicateEnd + 1);
+    const object = this.readFastObject(i);
+    if (!object) return null;
+    i = this.skipHws(this.fastEnd);
+    if (this.input.charCodeAt(i) !== 41 || this.input.charCodeAt(i + 1) !== 62 || this.input.charCodeAt(i + 2) !== 62) return null;
+    this.fastEnd = i + 3;
+    return this.factory.quad(subject, predicate, object, this.factory.defaultGraph());
   }
   readFastNode(index, cache) {
     const code = this.input.charCodeAt(index);
