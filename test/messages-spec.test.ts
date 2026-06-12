@@ -200,6 +200,18 @@ ex:s ex:p ex:o .`);
     ]);
   });
 
+  it(`accepts compact @message. delimiters — ${url('two-messages-with-at-message')}`, () => {
+    const messages = parseMessages(`@version "1.1-messages".
+<http://example.org/s1> <http://example.org/p> <http://example.org/o1>.
+@message.
+<http://example.org/s2> <http://example.org/p> <http://example.org/o2>.`);
+
+    expect(messageIds(messages)).toEqual([
+      ['<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .'],
+      ['<http://example.org/s2> <http://example.org/p> <http://example.org/o2> .'],
+    ]);
+  });
+
   it(`parses mixed legacy and uppercase message delimiters with a trailing empty message — ${url('two-messages-with-at-message')} ${url('empty-message-between-non-empty-messages')}`, () => {
     const messages = parseMessages(`@version "1.2-messages" .
 @prefix ex: <http://example.org/>.

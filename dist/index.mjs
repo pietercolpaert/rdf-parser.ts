@@ -1174,7 +1174,7 @@ var CoreParser = class {
         this.parseBaseDirective(true);
         return true;
       }
-      if (this.matchWord("message")) {
+      if (this.matchWord("message", true)) {
         this.parseMessageDirective(true, currentGraph);
         return true;
       }
@@ -1648,12 +1648,12 @@ var CoreParser = class {
       return;
     }
   }
-  matchWord(word) {
+  matchWord(word, allowDotBoundary = false) {
     if (this.input.length - this.index < word.length) return false;
     if (this.input.slice(this.index, this.index + word.length).toLowerCase() !== word.toLowerCase()) return false;
     const previous = this.index > 0 ? this.input.charCodeAt(this.index - 1) : -1;
     const next = this.input.charCodeAt(this.index + word.length);
-    if (previous >= 0 && isWordBoundaryBlocker(previous) || isWordBoundaryBlocker(next)) return false;
+    if (previous >= 0 && isWordBoundaryBlocker(previous) || isWordBoundaryBlocker(next) && !(allowDotBoundary && next === 46)) return false;
     this.index += word.length;
     return true;
   }
