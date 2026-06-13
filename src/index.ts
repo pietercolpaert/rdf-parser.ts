@@ -1301,6 +1301,13 @@ class CoreParser {
       this.parseGraphStatements(subjectOrGraph);
       return false;
     }
+    if (this.isBlankNodePropertyListSubject(termStart, termEnd)) {
+      if (this.peekCharCode() === 46) {
+        this.index++;
+        return false;
+      }
+      if (allowGraphCloseTerminator && this.peekCharCode() === 125) return true;
+    }
     return this.parsePredicateObjectList(subjectOrGraph, defaultGraph, 46, allowGraphCloseTerminator);
   }
 
@@ -1505,6 +1512,10 @@ class CoreParser {
       return false;
     }
     return true;
+  }
+
+  private isBlankNodePropertyListSubject(start: number, end: number): boolean {
+    return this.input.charCodeAt(start) === 91 && !this.isAnonymousBlankNodeLabel(start, end);
   }
 
   private parseTerm(graph: TermLike): TermLike {

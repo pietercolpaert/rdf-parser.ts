@@ -574,6 +574,13 @@ var init_index = __esm({
           this.parseGraphStatements(subjectOrGraph);
           return false;
         }
+        if (this.isBlankNodePropertyListSubject(termStart, termEnd)) {
+          if (this.peekCharCode() === 46) {
+            this.index++;
+            return false;
+          }
+          if (allowGraphCloseTerminator && this.peekCharCode() === 125) return true;
+        }
         return this.parsePredicateObjectList(subjectOrGraph, defaultGraph2, 46, allowGraphCloseTerminator);
       }
       parseGraphStatements(graph) {
@@ -759,6 +766,9 @@ var init_index = __esm({
           return false;
         }
         return true;
+      }
+      isBlankNodePropertyListSubject(start, end) {
+        return this.input.charCodeAt(start) === 91 && !this.isAnonymousBlankNodeLabel(start, end);
       }
       parseTerm(graph) {
         this.skipWsAndComments();
