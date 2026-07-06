@@ -8,7 +8,7 @@ Try the interactive browser demo at [https://www.pieter.pm/rdf-parser.ts/](https
 
 This implementation has been built with a clear scope in mind: RDF1.2 compliance for parsing these 4 formats with RDF Messages support using the RDF/JS data model. We will explicitly never support storing data or reasoning.
 
-We have a sibling package for writing data called [rdf-writer.ts](https://github.com/pietercolpaert/rdf-writer.ts).
+We have a sibling package for writing data called [rdf-writer-ts](https://github.com/pietercolpaert/rdf-writer-ts).
 
 > [!NOTE]
 > I built this as an agentic coding experiment for myself. I’m happy to see spec compliance, RDF Messages support, and a significant performance improvement over N3.js on the generated benchmarks, but integration tests with other software will need to show whether this work is as maintainable and useful as other libraries. This project would not have been possible without Blake Regalia’s work on Graphy and Ruben Verborgh’s work on N3.js.
@@ -16,7 +16,7 @@ We have a sibling package for writing data called [rdf-writer.ts](https://github
 ## Install
 
 ```sh
-npm install rdf-parser.ts
+npm install rdf-parser-ts
 ```
 
 ## Package layout
