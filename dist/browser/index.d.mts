@@ -41,39 +41,13 @@ export type {
   TermLike,
   TermType,
   VariableLike,
-  WriterOptions,
 } from '../index';
 
-import type { Message, MessageQuad, NamedNodeLike, ParserOptions, ParserOutputItem, QuadLike, TermLike, WriterOptions } from '../index';
+import type { NamedNodeLike, ParserOptions, ParserOutputItem, QuadLike } from '../index';
 
 type BrowserStreamChunk = string | Uint8Array | ArrayBuffer;
-type BrowserWriterOutputStream = {
-  write(chunk: string, encoding?: string, callback?: (error?: Error | null) => void): unknown;
-  end(callback?: (error?: Error | null, output?: string) => void): unknown;
-};
-type BrowserWriterEndCallback = (error?: Error | null, output?: string) => void;
 
 export type StreamParserOptions = ParserOptions;
-
-export declare class Writer {
-  constructor(options?: WriterOptions);
-  constructor(outputStream: BrowserWriterOutputStream, options?: WriterOptions);
-  quadToString(subject: TermLike, predicate: TermLike, object: TermLike, graph?: TermLike): string;
-  quadsToString(quads: Iterable<QuadLike>): string;
-  addQuad(quad: QuadLike | MessageQuad, done?: (error?: Error | null) => void): void;
-  addQuad(subject: TermLike, predicate: TermLike, object: TermLike, done?: (error?: Error | null) => void): void;
-  addQuad(subject: TermLike, predicate: TermLike, object: TermLike, graph: TermLike, done?: (error?: Error | null) => void): void;
-  addQuads(quads: Iterable<QuadLike | MessageQuad>): void;
-  addMessage(message: Iterable<QuadLike> | Message, done?: (error?: Error | null) => void): void;
-  addPrefix(prefix: string, iri: string | NamedNodeLike, done?: (error?: Error | null) => void): void;
-  addPrefixes(prefixes: Record<string, string | NamedNodeLike>, done?: (error?: Error | null) => void): void;
-  blank(): TermLike;
-  blank(children: Array<{ predicate: TermLike; object: TermLike }>): TermLike;
-  blank(child: { predicate: TermLike; object: TermLike }): TermLike;
-  blank(predicate: TermLike, object: TermLike): TermLike;
-  list(elements?: TermLike[]): TermLike;
-  end(done?: BrowserWriterEndCallback): void;
-}
 
 export declare class StreamParser {
   readonly readable: ReadableStream<ParserOutputItem>;

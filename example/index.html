@@ -257,7 +257,7 @@ ex:m2 ex:p ex:o2 .</textarea>
         <details id="project-code-panel">
           <summary>Use this in your project</summary>
           <div>
-            <p class="hint">After parsing, this snippet mirrors the selected parser and writer configuration.</p>
+            <p class="hint">After parsing, this snippet mirrors the selected parser and N3 serialization configuration.</p>
             <button id="copy-code" class="secondary" type="button" disabled>Copy project code</button>
             <label for="demo-code">Browser code for this configuration</label>
             <pre id="demo-code" aria-live="polite"></pre>
@@ -267,8 +267,11 @@ ex:m2 ex:p ex:o2 .</textarea>
     </div>
   </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/n3@2.0.3/browser/n3.min.js"></script>
   <script type="module">
-    import { Parser, StreamParser, Writer, isMessageQuad } from '../dist/browser/index.mjs';
+    import { Parser, StreamParser, isMessageQuad } from '../dist/browser/index.mjs';
+
+    const N3Writer = globalThis.N3?.Writer;
 
     const form = document.querySelector('#rdf-form');
     const sourceInputs = [...document.querySelectorAll('input[name="source"]')];
@@ -569,11 +572,8 @@ ex:m2 ex:p ex:o2 .</textarea>
       return options;
     }
 
-    function createWriterOptions(detected, format) {
-      const options = { format };
-      if (detected.rdfMessages) options.rdfMessages = true;
-      if (detected.version && detected.rdfMessages) options.version = detected.version;
-      return options;
+    function createWriterOptions(_detected, format) {
+      return { format };
     }
 
     function createLiveWriter(writerOptions) {
@@ -603,7 +603,8 @@ ex:m2 ex:p ex:o2 .</textarea>
           },
         },
       };
-      return { writer: new Writer(liveOutput.stream, writerOptions), liveOutput };
+      if (!N3Writer) throw new Error('N3 writer is unavailable.');
+      return { writer: new N3Writer(liveOutput.stream, writerOptions), liveOutput };
     }
 
     function parseText(text, parserOptions, items, writer) {
@@ -644,7 +645,7 @@ ex:m2 ex:p ex:o2 .</textarea>
     function writeItem(writer, item) {
       if (!writer) return;
       let writeError;
-      writer.addQuad(item, error => {
+      writer.addQuad(isMessageQuad(item) ? item.quad : item, error => {
         if (error) writeError = error;
       });
       if (writeError) throw writeError;
@@ -663,8 +664,7 @@ ex:m2 ex:p ex:o2 .</textarea>
 
     function preserveExpectedMessageCount(expectedMessageCount, items, writer) {
       items.messageCount = Math.max(items.messageCount || 0, expectedMessageCount);
-      if (!writer) return;
-      for (let index = countMessageCounters(items); index < expectedMessageCount; index++) writer.addMessage([]);
+      // N3 serialization writes quads only; message boundaries are still counted in the metrics.
     }
 
     async function finishWriter(writer, liveOutput) {
@@ -686,7 +686,7 @@ ex:m2 ex:p ex:o2 .</textarea>
         : `const rdfText = ${JSON.stringify(text.length > 1200 ? 'Paste RDF text here.' : text)};\nconst inputStream = new Blob([rdfText]).stream();`;
 
       if (!shouldSerialize) {
-        return `import { StreamParser } from 'https://cdn.jsdelivr.net/npm/rdf-parser-ts/dist/browser/index.mjs';
+        return `import { StreamParser } from 'https://cdn.jsdelivr.net/npm/rdf-parser.ts/dist/browser/index.mjs';
 
 const parserOptions = ${parserOptionsSource};
 ${sourceSetup}
@@ -700,30 +700,21 @@ for await (const item of inputStream.pipeThrough(parser)) {
 
       const writerOptionsSource = JSON.stringify(writerOptions, null, 2);
 
-      return `import { StreamParser, Writer } from 'https://cdn.jsdelivr.net/npm/rdf-parser-ts/dist/browser/index.mjs';
+      return `import { StreamParser, isMessageQuad } from 'https://cdn.jsdelivr.net/npm/rdf-parser.ts/dist/browser/index.mjs';
+import { Writer } from 'https://esm.sh/n3@2.0.3';
 
 const parserOptions = ${parserOptionsSource};
 const writerOptions = ${writerOptionsSource};
 ${sourceSetup}
 
 const parser = new StreamParser(parserOptions);
-let serialized = '';
-const writer = new Writer({
-  write(chunk, _encoding, callback) {
-    serialized += chunk;
-    // Update your UI with the partial serialized output here.
-    callback?.(null);
-  },
-  end(callback) {
-    callback?.(null, serialized);
-  },
-}, writerOptions);
+const writer = new Writer(writerOptions);
 
 for await (const item of inputStream.pipeThrough(parser)) {
-  writer.addQuad(item);
+  writer.addQuad(isMessageQuad(item) ? item.quad : item);
 }
 
-serialized = await new Promise((resolve, reject) => {
+const serialized = await new Promise((resolve, reject) => {
   writer.end((error, result) => error ? reject(error) : resolve(result || ''));
 });
 

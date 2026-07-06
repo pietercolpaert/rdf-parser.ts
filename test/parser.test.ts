@@ -35,6 +35,14 @@ describe('Parser', () => {
     ]);
   });
 
+  it('rejects invalid characters in Turtle IRIs', () => {
+    const parser = new Parser();
+    expect(() => parser.parse(String.raw`<http://example.org/\u0020> <p> <o> .`)).toThrow('Invalid character in IRI');
+    expect(() => parser.parse(String.raw`<http://example.org/\u003C> <p> <o> .`)).toThrow('Invalid character in IRI');
+    expect(() => parser.parse(String.raw`<http://example.org/\u003E> <p> <o> .`)).toThrow('Invalid character in IRI');
+    expect(() => parser.parse('<http://example.org/{abc}> <p> <o> .')).toThrow('Invalid character in IRI');
+  });
+
   it('parses Turtle prefixes, literals, booleans, and numeric terms', () => {
     expect(ids('@prefix ex: <http://example.com/>. ex:s ex:p "hello"@EN; ex:n 42, 1.25, 1e2; a ex:T; ex:b true .')).toEqual([
       '<http://example.com/s> <http://example.com/p> "hello"@en .',

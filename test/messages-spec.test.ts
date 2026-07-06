@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DataFactory, Parser, Quad, Writer, isMessageQuad, quadToString, toMessages, type Message, type QuadLike } from '../src';
+import { DataFactory, Parser, Quad, isMessageQuad, quadToString, toMessages, type Message, type QuadLike } from '../src';
 
 const SPEC_URL = 'https://w3c-cg.github.io/rsp/spec/messages-tests';
 const url = (fragment: string): string => `${SPEC_URL}#${fragment}`;
@@ -18,12 +18,6 @@ function messageIds(messages: Message[]): string[][] {
 
 function parseMessages(input: string, format?: string): Message[] {
   return new Parser({ format }).parseMessages(input);
-}
-
-function endWriter(writer: Writer): Promise<string> {
-  return new Promise((resolve, reject) => {
-    writer.end((error, output) => error ? reject(error) : resolve(output ?? ''));
-  });
 }
 
 describe('RDF Messages spec parsing tests', () => {
@@ -248,46 +242,6 @@ MESSAGE`);
         '_:m3_b0 <http://www.w3.org/1999/02/22-rdf-syntax-ns#reifies> <<(<http://example.org/s1> <http://example.org/p> <http://example.org/o3>)>> .',
         '<http://example.org/m3> <http://example.org/p> _:m3_b0 .',
       ],
-      [],
-    ]);
-  });
-});
-
-describe('RDF Messages spec serialization tests', () => {
-  it(`round-trips messages with an empty message between non-empty messages — ${url('serialization-tests-turtle-trig-n-triples-n-quads')}`, async () => {
-    const writer = new Writer({ format: 'N-Quads' });
-    writer.addMessage([quad('http://example.org/s1', 'http://example.org/p', 'http://example.org/o1')]);
-    writer.addMessage([]);
-    writer.addMessage([quad('http://example.org/s2', 'http://example.org/p', 'http://example.org/o2')]);
-
-    const output = await endWriter(writer);
-    expect(messageIds(parseMessages(output, 'n-quads'))).toEqual([
-      ['<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .'],
-      [],
-      ['<http://example.org/s2> <http://example.org/p> <http://example.org/o2> .'],
-    ]);
-  });
-
-  it(`round-trips named graph messages — ${url('serialization-tests-turtle-trig-n-triples-n-quads')}`, async () => {
-    const writer = new Writer({ format: 'N-Quads' });
-    writer.addMessage([quad('http://example.org/a', 'http://example.org/b', 'http://example.org/c', 'http://example.org/g')]);
-    writer.addMessage([quad('http://example.org/d', 'http://example.org/e', 'http://example.org/f', 'http://example.org/g')]);
-
-    const output = await endWriter(writer);
-    expect(messageIds(parseMessages(output, 'n-quads'))).toEqual([
-      ['<http://example.org/a> <http://example.org/b> <http://example.org/c> <http://example.org/g> .'],
-      ['<http://example.org/d> <http://example.org/e> <http://example.org/f> <http://example.org/g> .'],
-    ]);
-  });
-
-  it(`round-trips trailing empty messages — ${url('serialization-tests-turtle-trig-n-triples-n-quads')}`, async () => {
-    const writer = new Writer({ format: 'N-Quads' });
-    writer.addMessage([quad('http://example.org/s1', 'http://example.org/p', 'http://example.org/o1')]);
-    writer.addMessage([]);
-
-    const output = await endWriter(writer);
-    expect(messageIds(parseMessages(output, 'n-quads'))).toEqual([
-      ['<http://example.org/s1> <http://example.org/p> <http://example.org/o1> .'],
       [],
     ]);
   });

@@ -1,7 +1,7 @@
 {
-  "name": "rdf-parser-ts",
-  "version": "0.2.6",
-  "description": "Fast RDF-JS parser and writer for Turtle, N-Triples, N-Quads, and TriG for the browser and NodeJS.",
+  "name": "rdf-parser.ts",
+  "version": "0.3.0",
+  "description": "Fast RDF-JS parser for Turtle, TriG, N-Triples, N-Quads, and RDF Messages for NodeJS and browsers.",
   "keywords": [
     "rdf",
     "rdf-js",
@@ -23,10 +23,16 @@
   "author": "Pieter Colpaert",
   "type": "commonjs",
   "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "browser": "./dist/browser/index.mjs",
+  "bin": {
+    "rdf-parser-ts": "./dist/bin/rdf-parser.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "browser": "./dist/browser/index.mjs",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     },
@@ -34,16 +40,8 @@
       "types": "./dist/browser/index.d.ts",
       "import": "./dist/browser/index.mjs",
       "default": "./dist/browser/index.mjs"
-    }
-  },
-  "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
-  "browser": "./dist/browser/index.mjs",
-  "unpkg": "./dist/browser/index.global.js",
-  "jsdelivr": "./dist/browser/index.global.js",
-  "bin": {
-    "rdf-parser-ts": "dist/bin/rdf-parser.js"
+    },
+    "./package.json": "./package.json"
   },
   "directories": {
     "test": "test"
@@ -94,7 +92,8 @@
     "perf:graphy": "npm run build && node perf/bench.js --no-triple-terms"
   },
   "dependencies": {
-    "@rdfjs/types": "^2.0.1"
+    "@rdfjs/types": "^2.0.1",
+    "n3": "^2.0.1"
   },
   "devDependencies": {
     "@graphy/content.nq.read": "^4.3.7",
@@ -102,7 +101,6 @@
     "arrayify-stream": "^3.0.0",
     "esbuild": "^0.27.7",
     "eyeling": "^1.28.3",
-    "n3": "^2.0.1",
     "rdf-test-suite": "^2.1.4",
     "streamify-string": "^1.0.1",
     "tsup": "^8.5.0",

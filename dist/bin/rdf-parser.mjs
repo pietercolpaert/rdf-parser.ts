@@ -47,6 +47,9 @@ function isMessagesVersion(version) {
 function isWs(code) {
   return code === 32 || code === 9 || code === 10 || code === 13;
 }
+function isInvalidIriChar(code) {
+  return code <= 32 || code === 34 || code === 60 || code === 62 || code === 94 || code === 96 || code === 123 || code === 124 || code === 125;
+}
 function isNameChar(code) {
   return code >= 65 && code <= 90 || code >= 97 && code <= 122 || code >= 48 && code <= 57 || code === 95 || code === 45 || code === 46;
 }
@@ -874,10 +877,12 @@ var init_index = __esm({
             if ((this.strictNTriples || this.strictNQuads) && escapeCode !== 117 && escapeCode !== 85) {
               this.fail("Only Unicode escapes are allowed in IRIs");
             }
-            value += this.readEscape();
+            const escaped = this.readEscape();
+            if (isInvalidIriChar(escaped.codePointAt(0) ?? -1)) this.fail("Invalid character in IRI");
+            value += escaped;
             continue;
           }
-          if ((this.strictNTriples || this.strictNQuads) && (code <= 32 || code === 34 || code === 60 || code === 94 || code === 96 || code === 123 || code === 124 || code === 125)) {
+          if (isInvalidIriChar(code)) {
             this.fail("Invalid character in IRI");
           }
           value += this.input[this.index];
