@@ -257,7 +257,7 @@ ex:m2 ex:p ex:o2 .</textarea>
         <details id="project-code-panel">
           <summary>Use this in your project</summary>
           <div>
-            <p class="hint">After parsing, this snippet mirrors the selected parser and N3 serialization configuration.</p>
+            <p class="hint">After parsing, this snippet mirrors the selected parser and rdf-writer-ts serialization configuration.</p>
             <button id="copy-code" class="secondary" type="button" disabled>Copy project code</button>
             <label for="demo-code">Browser code for this configuration</label>
             <pre id="demo-code" aria-live="polite"></pre>
@@ -267,11 +267,8 @@ ex:m2 ex:p ex:o2 .</textarea>
     </div>
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/n3@2.0.3/browser/n3.min.js"></script>
   <script type="module">
-    import { Parser, StreamParser, isMessageQuad } from '../dist/browser/index.mjs';
-
-    const N3Writer = globalThis.N3?.Writer;
+    import { Parser, StreamParser, Writer, isMessageQuad } from '../dist/browser/index.mjs';
 
     const form = document.querySelector('#rdf-form');
     const sourceInputs = [...document.querySelectorAll('input[name="source"]')];
@@ -603,8 +600,7 @@ ex:m2 ex:p ex:o2 .</textarea>
           },
         },
       };
-      if (!N3Writer) throw new Error('N3 writer is unavailable.');
-      return { writer: new N3Writer(liveOutput.stream, writerOptions), liveOutput };
+      return { writer: new Writer(liveOutput.stream, writerOptions), liveOutput };
     }
 
     function parseText(text, parserOptions, items, writer) {
@@ -664,7 +660,7 @@ ex:m2 ex:p ex:o2 .</textarea>
 
     function preserveExpectedMessageCount(expectedMessageCount, items, writer) {
       items.messageCount = Math.max(items.messageCount || 0, expectedMessageCount);
-      // N3 serialization writes quads only; message boundaries are still counted in the metrics.
+      // Serialization writes quads only; message boundaries are still counted in the metrics.
     }
 
     async function finishWriter(writer, liveOutput) {
@@ -700,8 +696,7 @@ for await (const item of inputStream.pipeThrough(parser)) {
 
       const writerOptionsSource = JSON.stringify(writerOptions, null, 2);
 
-      return `import { StreamParser, isMessageQuad } from 'https://cdn.jsdelivr.net/npm/rdf-parser.ts/dist/browser/index.mjs';
-import { Writer } from 'https://esm.sh/n3@2.0.3';
+      return `import { StreamParser, Writer, isMessageQuad } from 'https://cdn.jsdelivr.net/npm/rdf-parser.ts/dist/browser/index.mjs';
 
 const parserOptions = ${parserOptionsSource};
 const writerOptions = ${writerOptionsSource};

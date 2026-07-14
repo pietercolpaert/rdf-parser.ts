@@ -23,6 +23,8 @@ export {
   variable,
 } from './index';
 
+export { Writer } from 'rdf-writer-ts';
+
 import { IncrementalParser, isMessageQuad } from './index';
 
 export type {
@@ -44,6 +46,8 @@ export type {
   TermType,
   VariableLike,
 } from './index';
+
+export type { WriterOptions, WriterOutputStream } from 'rdf-writer-ts';
 
 import type { MessageQuad, NamedNodeLike, ParserOptions, ParserOutputItem, QuadLike } from './index';
 

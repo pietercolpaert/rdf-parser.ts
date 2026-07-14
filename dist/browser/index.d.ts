@@ -22,6 +22,7 @@ export {
   toMessages,
   variable,
 } from '../index';
+export { Writer } from 'rdf-writer-ts';
 
 export type {
   BlankNodeLike,
@@ -42,6 +43,7 @@ export type {
   TermType,
   VariableLike,
 } from '../index';
+export type { WriterOptions, WriterOutputStream } from 'rdf-writer-ts';
 
 import type { NamedNodeLike, ParserOptions, ParserOutputItem, QuadLike } from '../index';
 

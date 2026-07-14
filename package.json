@@ -93,7 +93,7 @@
   },
   "dependencies": {
     "@rdfjs/types": "^2.0.1",
-    "n3": "^2.0.1"
+    "rdf-writer-ts": "^0.1.1"
   },
   "devDependencies": {
     "@graphy/content.nq.read": "^4.3.7",
@@ -101,6 +101,7 @@
     "arrayify-stream": "^3.0.0",
     "esbuild": "^0.27.7",
     "eyeling": "^1.28.3",
+    "n3": "^2.1.1",
     "rdf-test-suite": "^2.1.4",
     "streamify-string": "^1.0.1",
     "tsup": "^8.5.0",

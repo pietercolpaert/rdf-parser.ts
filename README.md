@@ -105,10 +105,10 @@ Current minified browser bundle sizes after `npm run build`, measured with `gzip
 
 | Bundle | Minified | gzip compressed |
 | --- | ---: | ---: |
-| `dist/browser/index.mjs` | 31,617 bytes (30.9 KiB) | 8,267 bytes (8.1 KiB) |
-| `dist/browser/index.global.js` | 32,099 bytes (31.3 KiB) | 8,462 bytes (8.3 KiB) |
+| `dist/browser/index.mjs` | 42,908 bytes (41.9 KiB) | 11,032 bytes (10.8 KiB) |
+| `dist/browser/index.global.js` | 43,393 bytes (42.4 KiB) | 11,223 bytes (11.0 KiB) |
 
-The `example/` folder contains a browser-only playground. It parses RDF with this package, reports quads/messages per second, and currently uses N3 in the browser for optional serialization until the standalone `rdf-writer.ts` package is wired in.
+The `example/` folder contains a browser-only playground. It parses RDF with this package, reports quads/messages per second, and uses `rdf-writer-ts` from the browser bundle for optional serialization which is **included** in the bundle size.
 
 ## Parsing strings
 
