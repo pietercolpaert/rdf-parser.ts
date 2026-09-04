@@ -4,7 +4,7 @@
 
 Fast RDF/JS parsing for Turtle, TriG, N-Triples, N-Quads, RDF 1.2 triple terms, and RDF Message Logs in Node.js and browsers. 
 
-Try the interactive browser demo at [https://www.pieter.pm/rdf-parser.ts/](https://www.pieter.pm/rdf-parser.ts/).
+Try the interactive browser demo at [https://www.pieter.pm/rdf-parser.ts/](https://www.pieter.pm/rdf-parser-ts/example/).
 
 This implementation has been built with a clear scope in mind: RDF1.2 compliance for parsing these 4 formats with RDF Messages support using the RDF/JS data model. We will explicitly never support storing data or reasoning.
 
